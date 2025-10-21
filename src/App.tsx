@@ -334,9 +334,9 @@ function App() {
             <table className="income-table">
               <thead>
                 <tr>
+                  <th>Type</th>
                   <th>Income Name</th>
                   <th>Income Earned So Far (£)</th>
-                  <th>Type</th>
                   <th>Start Date</th>
                   <th>End Date</th>
                   <th>Payroll Date (Day)</th>
@@ -356,6 +356,18 @@ function App() {
 
                   return (
                     <tr key={source.id}>
+                      {/* Type - First Column */}
+                      <td>
+                        <select
+                          value={source.isRegular ? 'regular' : 'one-off'}
+                          onChange={(e) => updateSource(source.id, 'isRegular', e.target.value === 'regular')}
+                          className="input-field type-select"
+                        >
+                          <option value="regular">Regular</option>
+                          <option value="one-off">One-off</option>
+                        </select>
+                      </td>
+                      {/* Income Name */}
                       <td>
                         <input
                           type="text"
@@ -364,6 +376,7 @@ function App() {
                           className="input-field"
                         />
                       </td>
+                      {/* Income Earned So Far */}
                       <td>
                         <input
                           type="number"
@@ -372,16 +385,6 @@ function App() {
                           className="input-field numeric"
                           step="0.01"
                         />
-                      </td>
-                      <td>
-                        <select
-                          value={source.isRegular ? 'regular' : 'one-off'}
-                          onChange={(e) => updateSource(source.id, 'isRegular', e.target.value === 'regular')}
-                          className="input-field"
-                        >
-                          <option value="regular">Regular</option>
-                          <option value="one-off">One-off</option>
-                        </select>
                       </td>
                       <td>
                         {source.isRegular ? (
@@ -425,7 +428,10 @@ function App() {
                         <div className="projected-cell">
                           <input
                             type="number"
-                            value={source.projectedIncome !== undefined ? source.projectedIncome : projectedOrActual}
+                            value={source.projectedIncome !== undefined ? 
+                              source.projectedIncome.toFixed(2) : 
+                              projectedOrActual.toFixed(2)
+                            }
                             onChange={(e) => updateSource(source.id, 'projectedIncome', parseFloat(e.target.value) || 0)}
                             className="input-field numeric projected"
                             step="0.01"
@@ -436,32 +442,26 @@ function App() {
                           </span>
                         </div>
                       </td>
-                      {/* NEW: Tax Paid */}
+                      {/* Tax Paid - Editable for all sources */}
                       <td>
-                        {!source.isRegular ? (
-                          <input
-                            type="number"
-                            value={source.taxPaid || 0}
-                            onChange={(e) => updateSource(source.id, 'taxPaid', parseFloat(e.target.value) || 0)}
-                            className="input-field numeric"
-                            step="0.01"
-                            placeholder="Enter tax paid"
-                          />
-                        ) : (
-                          <span className="calculated-value">
-                            {detail?.taxPaid.toFixed(2) || '0.00'}
-                          </span>
-                        )}
+                        <input
+                          type="number"
+                          value={source.taxPaid !== undefined ? source.taxPaid : (detail?.taxPaid || 0)}
+                          onChange={(e) => updateSource(source.id, 'taxPaid', parseFloat(e.target.value) || 0)}
+                          className="input-field numeric"
+                          step="0.01"
+                          placeholder={source.isRegular ? "Auto-balanced" : "Enter tax paid"}
+                        />
                       </td>
-                      {/* NEW: PA Used */}
+                      {/* PA Used */}
                       <td className="calculated-cell">
-                        {detail?.paUsed.toFixed(2) || '0.00'}
+                        {detail ? detail.paUsed.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
                       </td>
-                      {/* NEW: Tax Due */}
+                      {/* Tax Due */}
                       <td className="calculated-cell">
-                        {detail?.taxDue.toFixed(2) || '0.00'}
+                        {detail ? detail.taxDue.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
                       </td>
-                      {/* NEW: Over/(Under) */}
+                      {/* Over/(Under) */}
                       <td className={`calculated-cell ${
                         detail && detail.difference > 0 ? 'positive' : 
                         detail && detail.difference < 0 ? 'negative' : ''
@@ -469,7 +469,7 @@ function App() {
                         {detail ? (
                           <>
                             {detail.difference > 0 ? '+' : ''}
-                            {detail.difference.toFixed(2)}
+                            {detail.difference.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </>
                         ) : '0.00'}
                       </td>
@@ -488,8 +488,8 @@ function App() {
                 {/* TOTALS ROW */}
                 {result && sources.length > 0 && (
                   <tr className="totals-row">
-                    <td><strong>TOTAL</strong></td>
                     <td></td>
+                    <td><strong>TOTAL</strong></td>
                     <td></td>
                     <td></td>
                     <td></td>
@@ -497,7 +497,7 @@ function App() {
                     <td><strong>£{result.totalIncome.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></td>
                     <td><strong>£{result.taxPaid.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></td>
                     <td><strong>£{result.personalAllowance.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></td>
-                    <td><strong>£{result.taxDue.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></td>
+                    <td><strong>£{result.finalTaxDue.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></td>
                     <td className={`totals-difference ${result.netPosition > 0 ? 'positive' : result.netPosition < 0 ? 'negative' : ''}`}>
                       <strong>
                         {result.netPosition > 0 ? '+' : ''}£{Math.abs(result.netPosition).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}

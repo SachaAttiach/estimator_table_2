@@ -133,7 +133,7 @@ export function calculateProjectedIncome(
   
   // Project annual income
   const dailyRate = incomeToDate / daysWorked;
-  const projected = dailyRate * daysInYear;
+  const projected = Math.round(dailyRate * daysInYear * 100) / 100;
   
   return { projected, daysWorked, daysInYear };
 }
@@ -258,19 +258,18 @@ function allocateTaxSequentially(
     let taxPaid: number;
     let notes: string;
     
-    if (source.isRegular) {
-      // Regular income - assume balanced PAYE
+    // Check if user has manually entered taxPaid
+    if (source.taxPaid !== undefined && source.taxPaid !== null) {
+      taxPaid = source.taxPaid;
+      notes = source.isRegular ? 'User override' : 'Actual tax deducted';
+    } else if (source.isRegular) {
+      // Regular income - assume balanced PAYE (default)
       taxPaid = taxDue;
       notes = 'Balanced PAYE (ongoing)';
     } else {
-      // One-off - use actual tax paid if provided
-      if (source.taxPaid !== undefined && source.taxPaid !== null) {
-        taxPaid = source.taxPaid;
-        notes = 'Actual tax deducted';
-      } else {
-        taxPaid = 0;
-        notes = 'No tax information provided';
-      }
+      // One-off with no tax paid entered
+      taxPaid = 0;
+      notes = 'No tax information provided';
     }
     
     // Step 5: Calculate difference (refund/underpayment)

@@ -99,12 +99,15 @@ header p {
 
 .table-wrapper {
   overflow-x: auto;
+  width: 100%;
 }
 
 .income-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.9rem;
+  table-layout: fixed;
+  min-width: 1600px;
 }
 
 .income-table th {
@@ -119,10 +122,72 @@ header p {
 .income-table td {
   padding: 10px 8px;
   border-bottom: 1px solid #e0e0e0;
+  white-space: nowrap;
 }
 
 .income-table tr:hover {
   background: #f8f9fa;
+}
+
+/* Fixed column widths for better layout */
+.income-table th:first-child,
+.income-table td:first-child {
+  width: 100px; /* Type */
+}
+
+.income-table th:nth-child(2),
+.income-table td:nth-child(2) {
+  width: 180px; /* Income Name */
+}
+
+.income-table th:nth-child(3),
+.income-table td:nth-child(3) {
+  width: 160px; /* Income Earned So Far */
+}
+
+.income-table th:nth-child(4),
+.income-table td:nth-child(4) {
+  width: 120px; /* Start Date */
+}
+
+.income-table th:nth-child(5),
+.income-table td:nth-child(5) {
+  width: 120px; /* End Date */
+}
+
+.income-table th:nth-child(6),
+.income-table td:nth-child(6) {
+  width: 120px; /* Payroll Date */
+}
+
+.income-table th:nth-child(7),
+.income-table td:nth-child(7) {
+  width: 180px; /* Projected/Actual Income */
+}
+
+.income-table th:nth-child(8),
+.income-table td:nth-child(8) {
+  width: 120px; /* Tax Paid */
+}
+
+.income-table th:nth-child(9),
+.income-table td:nth-child(9) {
+  width: 100px; /* PA Used */
+}
+
+.income-table th:nth-child(10),
+.income-table td:nth-child(10) {
+  width: 100px; /* Tax Due */
+}
+
+.income-table th:nth-child(11),
+.income-table td:nth-child(11) {
+  width: 120px; /* Over/(Under) */
+}
+
+.income-table th:nth-child(12),
+.income-table td:nth-child(12) {
+  width: 80px; /* Actions */
 }
 
 .input-field {
@@ -132,7 +197,8 @@ header p {
   border-radius: 4px;
   font-size: 0.9rem;
   font-family: inherit;
-  transition: border-color 0.2s;
+  transition: border-color 0.2s, background 0.2s;
+  min-width: 80px;
 }
 
 .input-field:focus {
@@ -140,12 +206,25 @@ header p {
   border-color: #0066cc;
 }
 
+.input-field:disabled {
+  background: #f5f5f5;
+  color: #999;
+  cursor: not-allowed;
+  border-color: #e0e0e0;
+}
+
 .input-field.numeric {
   text-align: right;
+  font-family: 'Courier New', monospace;
 }
 
 .input-field.projected {
   background: #f0f8ff;
+}
+
+.input-field.type-select {
+  min-width: 100px;
+  font-weight: 500;
 }
 
 .projected-cell {
