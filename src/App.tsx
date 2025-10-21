@@ -2,6 +2,8 @@ import { useState } from 'react';
 import './App.css';
 import {
   IncomeSource,
+  Deduction,
+  TaxAdjustment,
   calculateTax,
   CalculationResult,
   TAX_YEAR_START,
@@ -12,7 +14,9 @@ import {
 const SCENARIOS = {
   empty: {
     name: 'Empty',
-    sources: []
+    sources: [],
+    deductions: [],
+    adjustments: []
   },
   singleEmployment: {
     name: 'Single Employment',
@@ -26,7 +30,9 @@ const SCENARIOS = {
         endDate: '2026-04-05',
         payrollDate: 30
       }
-    ]
+    ],
+    deductions: [],
+    adjustments: []
   },
   twoJobs: {
     name: 'Two Jobs',
@@ -49,7 +55,22 @@ const SCENARIOS = {
         endDate: '2026-04-05',
         payrollDate: 15
       }
-    ]
+    ],
+    deductions: [
+      {
+        id: 'd1',
+        description: 'Job Expenses',
+        amount: 1200,
+        category: 'job_expenses' as const
+      },
+      {
+        id: 'd2',
+        description: 'Professional Subscriptions',
+        amount: 240,
+        category: 'professional_subs' as const
+      }
+    ],
+    adjustments: []
   },
   employmentPlusPension: {
     name: 'Employment + One-off Pension',
@@ -72,6 +93,15 @@ const SCENARIOS = {
         endDate: '2026-04-05',
         payrollDate: 1,
         taxPaid: 3452.06  // Emergency 0T code over-taxation
+      }
+    ],
+    deductions: [],
+    adjustments: [
+      {
+        id: 'a1',
+        description: '2024/25 Underpayment',
+        amount: 850,
+        type: 'underpayment' as const
       }
     ]
   },
@@ -96,6 +126,22 @@ const SCENARIOS = {
         endDate: '2026-04-05',
         payrollDate: 1,
         taxPaid: 11250  // 45% emergency tax rate
+      }
+    ],
+    deductions: [
+      {
+        id: 'd1',
+        description: 'Flat Rate Expenses',
+        amount: 140,
+        category: 'fre' as const
+      }
+    ],
+    adjustments: [
+      {
+        id: 'a1',
+        description: 'Untaxed Interest',
+        amount: 65,
+        type: 'untaxed_interest' as const
       }
     ]
   },
@@ -130,20 +176,28 @@ const SCENARIOS = {
         payrollDate: 1,
         taxPaid: 9000  // 45% emergency tax
       }
-    ]
+    ],
+    deductions: [],
+    adjustments: []
   }
 };
 
 function App() {
   const [sources, setSources] = useState<IncomeSource[]>([]);
+  const [deductions, setDeductions] = useState<Deduction[]>([]);
+  const [adjustments, setAdjustments] = useState<TaxAdjustment[]>([]);
   const [result, setResult] = useState<CalculationResult | null>(null);
   const [showBreakdown, setShowBreakdown] = useState(true);
+  const [showDeductions, setShowDeductions] = useState(false);
+  const [showAdjustments, setShowAdjustments] = useState(false);
 
-  // Calculate whenever sources change
-  const recalculate = (newSources: IncomeSource[]) => {
+  // Calculate whenever sources, deductions, or adjustments change
+  const recalculate = (newSources: IncomeSource[], newDeductions: Deduction[] = deductions, newAdjustments: TaxAdjustment[] = adjustments) => {
     setSources(newSources);
+    setDeductions(newDeductions);
+    setAdjustments(newAdjustments);
     if (newSources.length > 0) {
-      const calculationResult = calculateTax(newSources);
+      const calculationResult = calculateTax(newSources, newDeductions, newAdjustments);
       setResult(calculationResult);
     } else {
       setResult(null);
@@ -153,7 +207,11 @@ function App() {
   // Load a scenario
   const loadScenario = (scenarioKey: keyof typeof SCENARIOS) => {
     const scenario = SCENARIOS[scenarioKey];
-    recalculate(scenario.sources as IncomeSource[]);
+    recalculate(
+      scenario.sources as IncomeSource[], 
+      scenario.deductions as Deduction[], 
+      scenario.adjustments as TaxAdjustment[]
+    );
   };
 
   // Add new income source
@@ -167,7 +225,7 @@ function App() {
       endDate: TAX_YEAR_END.toISOString().split('T')[0],
       payrollDate: 30
     };
-    recalculate([...sources, newSource]);
+    recalculate([...sources, newSource], deductions, adjustments);
   };
 
   // Update a source
@@ -183,12 +241,60 @@ function App() {
       }
       return s;
     });
-    recalculate(newSources);
+    recalculate(newSources, deductions, adjustments);
   };
 
   // Delete a source
   const deleteSource = (id: string) => {
-    recalculate(sources.filter(s => s.id !== id));
+    recalculate(sources.filter(s => s.id !== id), deductions, adjustments);
+  };
+
+  // Deduction CRUD
+  const addDeduction = () => {
+    const newDeduction: Deduction = {
+      id: Date.now().toString(),
+      description: 'New Deduction',
+      amount: 0,
+      category: 'other'
+    };
+    const newDeductions = [...deductions, newDeduction];
+    recalculate(sources, newDeductions, adjustments);
+  };
+
+  const updateDeduction = (id: string, field: keyof Deduction, value: any) => {
+    const newDeductions = deductions.map(d => 
+      d.id === id ? { ...d, [field]: value } : d
+    );
+    recalculate(sources, newDeductions, adjustments);
+  };
+
+  const deleteDeduction = (id: string) => {
+    const newDeductions = deductions.filter(d => d.id !== id);
+    recalculate(sources, newDeductions, adjustments);
+  };
+
+  // Adjustment CRUD
+  const addAdjustment = () => {
+    const newAdjustment: TaxAdjustment = {
+      id: Date.now().toString(),
+      description: 'New Adjustment',
+      amount: 0,
+      type: 'other'
+    };
+    const newAdjustments = [...adjustments, newAdjustment];
+    recalculate(sources, deductions, newAdjustments);
+  };
+
+  const updateAdjustment = (id: string, field: keyof TaxAdjustment, value: any) => {
+    const newAdjustments = adjustments.map(a => 
+      a.id === id ? { ...a, [field]: value } : a
+    );
+    recalculate(sources, deductions, newAdjustments);
+  };
+
+  const deleteAdjustment = (id: string) => {
+    const newAdjustments = adjustments.filter(a => a.id !== id);
+    recalculate(sources, deductions, newAdjustments);
   };
 
   return (
@@ -409,39 +515,257 @@ function App() {
         )}
       </section>
 
+      {/* Deductions Section */}
+      <section className="deductions-section">
+        <div className="section-header" onClick={() => setShowDeductions(!showDeductions)}>
+          <h2>
+            {showDeductions ? '▼' : '▶'} Deductions
+            {deductions.length > 0 && (
+              <span className="section-count">
+                ({deductions.length} item{deductions.length !== 1 ? 's' : ''} · 
+                -£{deductions.reduce((sum, d) => sum + d.amount, 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+              </span>
+            )}
+          </h2>
+          <button onClick={(e) => { e.stopPropagation(); addDeduction(); }} className="add-btn-small">
+            + Add Deduction
+          </button>
+        </div>
+
+        {showDeductions && (
+          <div className="subsection-content">
+            {deductions.length === 0 ? (
+              <p className="empty-message">No deductions. Click "+ Add Deduction" to add job expenses, professional subscriptions, etc.</p>
+            ) : (
+              <table className="simple-table">
+                <thead>
+                  <tr>
+                    <th>Description</th>
+                    <th>Category</th>
+                    <th>Amount (£)</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deductions.map((deduction) => (
+                    <tr key={deduction.id}>
+                      <td>
+                        <input
+                          type="text"
+                          value={deduction.description}
+                          onChange={(e) => updateDeduction(deduction.id, 'description', e.target.value)}
+                          className="input-field"
+                          placeholder="e.g., Job Expenses"
+                        />
+                      </td>
+                      <td>
+                        <select
+                          value={deduction.category}
+                          onChange={(e) => updateDeduction(deduction.id, 'category', e.target.value)}
+                          className="input-field"
+                        >
+                          <option value="job_expenses">Job Expenses</option>
+                          <option value="professional_subs">Professional Subscriptions</option>
+                          <option value="fre">Flat Rate Expenses</option>
+                          <option value="marriage_allowance">Marriage Allowance</option>
+                          <option value="gift_aid">Gift Aid</option>
+                          <option value="other">Other</option>
+                        </select>
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          value={deduction.amount}
+                          onChange={(e) => updateDeduction(deduction.id, 'amount', parseFloat(e.target.value) || 0)}
+                          className="input-field numeric"
+                          step="0.01"
+                        />
+                      </td>
+                      <td>
+                        <button
+                          onClick={() => deleteDeduction(deduction.id)}
+                          className="delete-btn-small"
+                          title="Delete"
+                        >
+                          🗑️
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* Adjustments Section */}
+      <section className="adjustments-section">
+        <div className="section-header" onClick={() => setShowAdjustments(!showAdjustments)}>
+          <h2>
+            {showAdjustments ? '▼' : '▶'} Additional Tax Owed
+            {adjustments.length > 0 && (
+              <span className="section-count">
+                ({adjustments.length} item{adjustments.length !== 1 ? 's' : ''} · 
+                +£{adjustments.reduce((sum, a) => sum + a.amount, 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+              </span>
+            )}
+          </h2>
+          <button onClick={(e) => { e.stopPropagation(); addAdjustment(); }} className="add-btn-small">
+            + Add Adjustment
+          </button>
+        </div>
+
+        {showAdjustments && (
+          <div className="subsection-content">
+            {adjustments.length === 0 ? (
+              <p className="empty-message">No additional tax owed. Click "+ Add Adjustment" to add prior underpayments, untaxed interest, etc.</p>
+            ) : (
+              <table className="simple-table">
+                <thead>
+                  <tr>
+                    <th>Description</th>
+                    <th>Type</th>
+                    <th>Amount (£)</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adjustments.map((adjustment) => (
+                    <tr key={adjustment.id}>
+                      <td>
+                        <input
+                          type="text"
+                          value={adjustment.description}
+                          onChange={(e) => updateAdjustment(adjustment.id, 'description', e.target.value)}
+                          className="input-field"
+                          placeholder="e.g., 2024/25 Underpayment"
+                        />
+                      </td>
+                      <td>
+                        <select
+                          value={adjustment.type}
+                          onChange={(e) => updateAdjustment(adjustment.id, 'type', e.target.value)}
+                          className="input-field"
+                        >
+                          <option value="underpayment">Prior Year Underpayment</option>
+                          <option value="untaxed_interest">Untaxed Interest</option>
+                          <option value="benefit_in_kind">Benefit in Kind</option>
+                          <option value="state_benefits">State Benefits</option>
+                          <option value="other">Other</option>
+                        </select>
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          value={adjustment.amount}
+                          onChange={(e) => updateAdjustment(adjustment.id, 'amount', parseFloat(e.target.value) || 0)}
+                          className="input-field numeric"
+                          step="0.01"
+                        />
+                      </td>
+                      <td>
+                        <button
+                          onClick={() => deleteAdjustment(adjustment.id)}
+                          className="delete-btn-small"
+                          title="Delete"
+                        >
+                          🗑️
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+      </section>
+
       {result && (
         <>
           <section className="summary">
-            <h2>Tax Summary</h2>
-            <div className="summary-grid">
-              <div className="summary-item">
-                <span className="label">Total Income:</span>
-                <span className="value">£{result.totalIncome.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            <h2>Final Tax Summary</h2>
+            
+            <div className="summary-detailed">
+              <div className="summary-section">
+                <h3>Income & Allowances</h3>
+                <div className="summary-line">
+                  <span className="summary-label">Total Income</span>
+                  <span className="summary-value">£{result.totalIncome.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+                <div className="summary-line deduction">
+                  <span className="summary-label">Personal Allowance</span>
+                  <span className="summary-value">-£{result.personalAllowance.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+                <div className="summary-line subtotal">
+                  <span className="summary-label">Taxable (before deductions)</span>
+                  <span className="summary-value">£{result.taxableIncomeBeforeDeductions.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
               </div>
-              <div className="summary-item">
-                <span className="label">Personal Allowance:</span>
-                <span className="value">£{result.personalAllowance.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+
+              {result.totalDeductions > 0 && (
+                <div className="summary-section">
+                  <h3>Deductions</h3>
+                  {deductions.map((d) => (
+                    <div key={d.id} className="summary-line">
+                      <span className="summary-label">{d.description}</span>
+                      <span className="summary-value">-£{d.amount.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                  ))}
+                  <div className="summary-line subtotal">
+                    <span className="summary-label">Total Deductions</span>
+                    <span className="summary-value">-£{result.totalDeductions.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="summary-section">
+                <h3>Tax Calculation</h3>
+                <div className="summary-line highlight-line">
+                  <span className="summary-label">Final Taxable Income</span>
+                  <span className="summary-value">£{result.taxableIncomeAfterDeductions.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+                <div className="summary-line">
+                  <span className="summary-label">Tax Due on Income</span>
+                  <span className="summary-value">£{result.taxDueOnIncome.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
               </div>
-              <div className="summary-item">
-                <span className="label">Taxable Income:</span>
-                <span className="value">£{result.taxableIncome.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              </div>
-              <div className="summary-item">
-                <span className="label">Tax Due:</span>
-                <span className="value">£{result.taxDue.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              </div>
-              <div className="summary-item">
-                <span className="label">Tax Paid:</span>
-                <span className="value">£{result.taxPaid.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              </div>
-              <div className={`summary-item highlight ${result.netPosition > 0 ? 'refund' : result.netPosition < 0 ? 'owed' : ''}`}>
-                <span className="label">Net Position:</span>
-                <span className="value">
-                  {result.netPosition > 0 ? '+' : ''}£{Math.abs(result.netPosition).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  <span className="position-label">
-                    {result.netPosition > 0 ? ' (Refund)' : result.netPosition < 0 ? ' (Owed)' : ' (Balanced)'}
+
+              {result.totalAdjustments > 0 && (
+                <div className="summary-section">
+                  <h3>Additional Tax Owed</h3>
+                  {adjustments.map((a) => (
+                    <div key={a.id} className="summary-line">
+                      <span className="summary-label">{a.description}</span>
+                      <span className="summary-value">+£{a.amount.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                  ))}
+                  <div className="summary-line subtotal">
+                    <span className="summary-label">Total Additional Tax</span>
+                    <span className="summary-value">+£{result.totalAdjustments.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="summary-section final-section">
+                <div className="summary-line total-line">
+                  <span className="summary-label">Total Tax Due</span>
+                  <span className="summary-value">£{result.finalTaxDue.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+                <div className="summary-line total-line">
+                  <span className="summary-label">Total Tax Paid</span>
+                  <span className="summary-value">£{result.taxPaid.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+                <div className={`summary-line net-position-line ${result.netPosition > 0 ? 'refund' : result.netPosition < 0 ? 'owed' : 'balanced'}`}>
+                  <span className="summary-label">NET POSITION</span>
+                  <span className="summary-value">
+                    {result.netPosition > 0 ? '+' : ''}£{Math.abs(result.netPosition).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    <span className="position-status">
+                      {result.netPosition > 0 ? ' (REFUND DUE)' : result.netPosition < 0 ? ' (TAX OWED)' : ' (BALANCED)'}
+                    </span>
                   </span>
-                </span>
+                </div>
               </div>
             </div>
           </section>

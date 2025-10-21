@@ -30,6 +30,20 @@ export interface IncomeSource {
   taxPaid?: number; // actual tax paid (for one-offs or user override)
 }
 
+export interface Deduction {
+  id: string;
+  description: string;
+  amount: number;
+  category: 'job_expenses' | 'professional_subs' | 'fre' | 'marriage_allowance' | 'gift_aid' | 'other';
+}
+
+export interface TaxAdjustment {
+  id: string;
+  description: string;
+  amount: number;
+  type: 'underpayment' | 'untaxed_interest' | 'benefit_in_kind' | 'state_benefits' | 'other';
+}
+
 export interface SourceTaxDetail {
   name: string;
   income: number;
@@ -44,12 +58,19 @@ export interface SourceTaxDetail {
 export interface CalculationResult {
   totalIncome: number;
   personalAllowance: number;
-  taxableIncome: number;
-  taxDue: number;
+  totalDeductions: number;
+  taxableIncomeBeforeDeductions: number;
+  taxableIncomeAfterDeductions: number;
+  taxDueOnIncome: number;
+  totalAdjustments: number;
+  finalTaxDue: number; // taxDueOnIncome + adjustments
   taxPaid: number;
-  netPosition: number; // taxPaid - taxDue
+  netPosition: number; // taxPaid - finalTaxDue
   breakdown: CalculationBreakdown;
   sourceDetails: SourceTaxDetail[];
+  // Legacy fields for backwards compatibility
+  taxableIncome: number; // alias for taxableIncomeAfterDeductions
+  taxDue: number; // alias for finalTaxDue
 }
 
 export interface CalculationBreakdown {
@@ -273,7 +294,12 @@ function allocateTaxSequentially(
 /**
  * Main calculation function
  */
-export function calculateTax(sources: IncomeSource[], today: Date = new Date()): CalculationResult {
+export function calculateTax(
+  sources: IncomeSource[], 
+  deductions: Deduction[] = [],
+  adjustments: TaxAdjustment[] = [],
+  today: Date = new Date()
+): CalculationResult {
   const breakdown: CalculationBreakdown = {
     steps: [],
     sources: []
@@ -372,30 +398,82 @@ export function calculateTax(sources: IncomeSource[], today: Date = new Date()):
   
   breakdown.steps.push('');
   
-  // Step 4: Calculate totals
-  breakdown.steps.push('=== STEP 4: Summary ===');
+  // Step 4: Apply Deductions
+  breakdown.steps.push('=== STEP 4: Apply Deductions ===');
   
-  const taxableIncome = totalIncome - personalAllowance;
-  const taxDue = sourceDetails.reduce((sum, d) => sum + d.taxDue, 0);
+  const totalDeductions = deductions.reduce((sum, d) => sum + d.amount, 0);
+  const taxableIncomeBeforeDeductions = totalIncome - personalAllowance;
+  
+  if (deductions.length > 0) {
+    for (const deduction of deductions) {
+      breakdown.steps.push(`${deduction.description}: -£${deduction.amount.toFixed(2)}`);
+    }
+    breakdown.steps.push(`Total Deductions: £${totalDeductions.toFixed(2)}`);
+  } else {
+    breakdown.steps.push('No deductions');
+  }
+  
+  const taxableIncomeAfterDeductions = Math.max(0, taxableIncomeBeforeDeductions - totalDeductions);
+  breakdown.steps.push(`Taxable Income (after deductions): £${taxableIncomeAfterDeductions.toFixed(2)}`);
+  breakdown.steps.push('');
+  
+  // Step 5: Calculate tax on adjusted taxable income
+  breakdown.steps.push('=== STEP 5: Calculate Tax on Income ===');
+  
+  // Recalculate tax based on reduced taxable income
+  const taxDueOnIncome = calculateTaxDue(taxableIncomeAfterDeductions);
+  breakdown.steps.push(`Tax due on £${taxableIncomeAfterDeductions.toFixed(2)}: £${taxDueOnIncome.toFixed(2)}`);
+  breakdown.steps.push('');
+  
+  // Step 6: Apply Adjustments (additional tax owed)
+  breakdown.steps.push('=== STEP 6: Additional Tax Owed ===');
+  
+  const totalAdjustments = adjustments.reduce((sum, a) => sum + a.amount, 0);
+  
+  if (adjustments.length > 0) {
+    for (const adjustment of adjustments) {
+      breakdown.steps.push(`${adjustment.description}: +£${adjustment.amount.toFixed(2)}`);
+    }
+    breakdown.steps.push(`Total Additional Tax: £${totalAdjustments.toFixed(2)}`);
+  } else {
+    breakdown.steps.push('No additional tax owed');
+  }
+  breakdown.steps.push('');
+  
+  // Step 7: Final Summary
+  breakdown.steps.push('=== STEP 7: Final Summary ===');
+  
+  const finalTaxDue = taxDueOnIncome + totalAdjustments;
   const taxPaid = sourceDetails.reduce((sum, d) => sum + d.taxPaid, 0);
-  const netPosition = taxPaid - taxDue;
+  const netPosition = taxPaid - finalTaxDue;
   
   breakdown.steps.push(`Total Income: £${totalIncome.toFixed(2)}`);
   breakdown.steps.push(`Personal Allowance: £${personalAllowance.toFixed(2)}`);
-  breakdown.steps.push(`Taxable Income: £${taxableIncome.toFixed(2)}`);
-  breakdown.steps.push(`Total Tax Due: £${taxDue.toFixed(2)}`);
+  breakdown.steps.push(`Taxable Income (before deductions): £${taxableIncomeBeforeDeductions.toFixed(2)}`);
+  breakdown.steps.push(`Deductions: -£${totalDeductions.toFixed(2)}`);
+  breakdown.steps.push(`Taxable Income (after deductions): £${taxableIncomeAfterDeductions.toFixed(2)}`);
+  breakdown.steps.push(`Tax Due on Income: £${taxDueOnIncome.toFixed(2)}`);
+  breakdown.steps.push(`Additional Tax Owed: +£${totalAdjustments.toFixed(2)}`);
+  breakdown.steps.push(`Final Tax Due: £${finalTaxDue.toFixed(2)}`);
   breakdown.steps.push(`Total Tax Paid: £${taxPaid.toFixed(2)}`);
   breakdown.steps.push(`Net Position: £${netPosition.toFixed(2)} ${netPosition > 0 ? '(Refund)' : netPosition < 0 ? '(Owed)' : '(Balanced)'}`);
   
   return {
     totalIncome: Math.round(totalIncome * 100) / 100,
     personalAllowance: Math.round(personalAllowance * 100) / 100,
-    taxableIncome: Math.round(taxableIncome * 100) / 100,
-    taxDue: Math.round(taxDue * 100) / 100,
+    totalDeductions: Math.round(totalDeductions * 100) / 100,
+    taxableIncomeBeforeDeductions: Math.round(taxableIncomeBeforeDeductions * 100) / 100,
+    taxableIncomeAfterDeductions: Math.round(taxableIncomeAfterDeductions * 100) / 100,
+    taxDueOnIncome: Math.round(taxDueOnIncome * 100) / 100,
+    totalAdjustments: Math.round(totalAdjustments * 100) / 100,
+    finalTaxDue: Math.round(finalTaxDue * 100) / 100,
     taxPaid: Math.round(taxPaid * 100) / 100,
     netPosition: Math.round(netPosition * 100) / 100,
     breakdown,
-    sourceDetails
+    sourceDetails,
+    // Legacy fields for backwards compatibility
+    taxableIncome: Math.round(taxableIncomeAfterDeductions * 100) / 100,
+    taxDue: Math.round(finalTaxDue * 100) / 100
   };
 }
 
