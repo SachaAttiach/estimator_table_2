@@ -345,6 +345,93 @@ footer {
   font-size: 0.9rem;
 }
 
+/* New Calculated Cells */
+.calculated-cell {
+  text-align: right;
+  font-weight: 500;
+  color: #333;
+  background: #f8f9fa;
+  font-family: 'Courier New', monospace;
+}
+
+.calculated-value {
+  display: block;
+  text-align: right;
+  font-weight: 500;
+  color: #0066cc;
+  font-family: 'Courier New', monospace;
+}
+
+.calculated-cell.positive {
+  color: #28a745;
+  font-weight: 600;
+}
+
+.calculated-cell.negative {
+  color: #dc3545;
+  font-weight: 600;
+}
+
+/* Totals Row */
+.totals-row {
+  background: #e8f4f8 !important;
+  border-top: 3px solid #0066cc !important;
+  font-weight: 700;
+}
+
+.totals-row td {
+  padding: 15px 8px !important;
+  font-size: 1.05rem;
+}
+
+.totals-difference {
+  text-align: right;
+  font-size: 1.1rem;
+}
+
+.totals-difference.positive {
+  color: #28a745;
+}
+
+.totals-difference.negative {
+  color: #dc3545;
+}
+
+.net-label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: normal;
+  margin-top: 4px;
+}
+
+/* Summary Item Variants */
+.summary-item.refund {
+  background: #28a745;
+  border-color: #28a745;
+}
+
+.summary-item.owed {
+  background: #dc3545;
+  border-color: #dc3545;
+}
+
+.summary-item.refund .label,
+.summary-item.owed .label {
+  color: white;
+}
+
+.summary-item.refund .value,
+.summary-item.owed .value {
+  color: white;
+}
+
+.position-label {
+  display: inline-block;
+  font-size: 0.9rem;
+  font-weight: normal;
+  margin-left: 8px;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
   .app {
@@ -377,6 +464,15 @@ footer {
     flex-direction: column;
     align-items: flex-start;
     gap: 10px;
+  }
+  
+  .income-table {
+    font-size: 0.8rem;
+  }
+  
+  .income-table th,
+  .income-table td {
+    padding: 8px 4px;
   }
 }
 

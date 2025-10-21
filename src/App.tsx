@@ -70,7 +70,8 @@ const SCENARIOS = {
         isRegular: false,
         startDate: '2025-04-06',
         endDate: '2026-04-05',
-        payrollDate: 1
+        payrollDate: 1,
+        taxPaid: 3452.06  // Emergency 0T code over-taxation
       }
     ]
   },
@@ -93,7 +94,8 @@ const SCENARIOS = {
         isRegular: false,
         startDate: '2025-04-06',
         endDate: '2026-04-05',
-        payrollDate: 1
+        payrollDate: 1,
+        taxPaid: 11250  // 45% emergency tax rate
       }
     ]
   },
@@ -125,7 +127,8 @@ const SCENARIOS = {
         isRegular: false,
         startDate: '2025-04-06',
         endDate: '2026-04-05',
-        payrollDate: 1
+        payrollDate: 1,
+        taxPaid: 9000  // 45% emergency tax
       }
     ]
   }
@@ -232,12 +235,17 @@ function App() {
                   <th>End Date</th>
                   <th>Payroll Date (Day)</th>
                   <th>Projected/Actual Income (£)</th>
+                  <th>Tax Paid (£)</th>
+                  <th>PA Used (£)</th>
+                  <th>Tax Due (£)</th>
+                  <th>Over/(Under) (£)</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {sources.map((source) => {
+                {sources.map((source, idx) => {
                   const breakdown = result?.breakdown.sources.find(s => s.name === source.name);
+                  const detail = result?.sourceDetails[idx];
                   const projectedOrActual = breakdown?.projectedOrActual || 0;
 
                   return (
@@ -322,6 +330,43 @@ function App() {
                           </span>
                         </div>
                       </td>
+                      {/* NEW: Tax Paid */}
+                      <td>
+                        {!source.isRegular ? (
+                          <input
+                            type="number"
+                            value={source.taxPaid || 0}
+                            onChange={(e) => updateSource(source.id, 'taxPaid', parseFloat(e.target.value) || 0)}
+                            className="input-field numeric"
+                            step="0.01"
+                            placeholder="Enter tax paid"
+                          />
+                        ) : (
+                          <span className="calculated-value">
+                            {detail?.taxPaid.toFixed(2) || '0.00'}
+                          </span>
+                        )}
+                      </td>
+                      {/* NEW: PA Used */}
+                      <td className="calculated-cell">
+                        {detail?.paUsed.toFixed(2) || '0.00'}
+                      </td>
+                      {/* NEW: Tax Due */}
+                      <td className="calculated-cell">
+                        {detail?.taxDue.toFixed(2) || '0.00'}
+                      </td>
+                      {/* NEW: Over/(Under) */}
+                      <td className={`calculated-cell ${
+                        detail && detail.difference > 0 ? 'positive' : 
+                        detail && detail.difference < 0 ? 'negative' : ''
+                      }`}>
+                        {detail ? (
+                          <>
+                            {detail.difference > 0 ? '+' : ''}
+                            {detail.difference.toFixed(2)}
+                          </>
+                        ) : '0.00'}
+                      </td>
                       <td>
                         <button
                           onClick={() => deleteSource(source.id)}
@@ -334,6 +379,30 @@ function App() {
                     </tr>
                   );
                 })}
+                {/* TOTALS ROW */}
+                {result && sources.length > 0 && (
+                  <tr className="totals-row">
+                    <td><strong>TOTAL</strong></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td><strong>£{result.totalIncome.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></td>
+                    <td><strong>£{result.taxPaid.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></td>
+                    <td><strong>£{result.personalAllowance.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></td>
+                    <td><strong>£{result.taxDue.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></td>
+                    <td className={`totals-difference ${result.netPosition > 0 ? 'positive' : result.netPosition < 0 ? 'negative' : ''}`}>
+                      <strong>
+                        {result.netPosition > 0 ? '+' : ''}£{Math.abs(result.netPosition).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </strong>
+                      <span className="net-label">
+                        {result.netPosition > 0 ? ' (Refund)' : result.netPosition < 0 ? ' (Owed)' : ' (Balanced)'}
+                      </span>
+                    </td>
+                    <td></td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -357,9 +426,22 @@ function App() {
                 <span className="label">Taxable Income:</span>
                 <span className="value">£{result.taxableIncome.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </div>
-              <div className="summary-item highlight">
+              <div className="summary-item">
                 <span className="label">Tax Due:</span>
                 <span className="value">£{result.taxDue.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+              <div className="summary-item">
+                <span className="label">Tax Paid:</span>
+                <span className="value">£{result.taxPaid.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+              <div className={`summary-item highlight ${result.netPosition > 0 ? 'refund' : result.netPosition < 0 ? 'owed' : ''}`}>
+                <span className="label">Net Position:</span>
+                <span className="value">
+                  {result.netPosition > 0 ? '+' : ''}£{Math.abs(result.netPosition).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  <span className="position-label">
+                    {result.netPosition > 0 ? ' (Refund)' : result.netPosition < 0 ? ' (Owed)' : ' (Balanced)'}
+                  </span>
+                </span>
               </div>
             </div>
           </section>

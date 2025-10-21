@@ -27,6 +27,18 @@ export interface IncomeSource {
   endDate: string;
   payrollDate: number; // day of month (1-31)
   projectedIncome?: number; // user can override
+  taxPaid?: number; // actual tax paid (for one-offs or user override)
+}
+
+export interface SourceTaxDetail {
+  name: string;
+  income: number;
+  paUsed: number;
+  taxableIncome: number;
+  taxDue: number;
+  taxPaid: number;
+  difference: number; // taxPaid - taxDue
+  notes: string;
 }
 
 export interface CalculationResult {
@@ -34,7 +46,10 @@ export interface CalculationResult {
   personalAllowance: number;
   taxableIncome: number;
   taxDue: number;
+  taxPaid: number;
+  netPosition: number; // taxPaid - taxDue
   breakdown: CalculationBreakdown;
+  sourceDetails: SourceTaxDetail[];
 }
 
 export interface CalculationBreakdown {
@@ -146,6 +161,116 @@ export function calculateTaxDue(taxableIncome: number): number {
 }
 
 /**
+ * Calculate tax for a specific income slice, starting from a given taxable position
+ * This allows sequential allocation through tax bands
+ */
+function calculateTaxForSlice(
+  incomeAmount: number,
+  startingPosition: number
+): number {
+  if (incomeAmount <= 0) return 0;
+  
+  let tax = 0;
+  let remaining = incomeAmount;
+  let currentPosition = startingPosition;
+  
+  for (const band of TAX_BANDS) {
+    if (remaining <= 0) break;
+    
+    // Determine where this band starts and ends
+    const bandStart = currentPosition;
+    const bandEnd = band.limit;
+    
+    // How much room is left in this band from our current position?
+    const roomInBand = Math.max(0, bandEnd - bandStart);
+    
+    // How much of our remaining income fits in this band?
+    const incomeInThisBand = Math.min(remaining, roomInBand);
+    
+    if (incomeInThisBand > 0) {
+      tax += incomeInThisBand * band.rate;
+      remaining -= incomeInThisBand;
+      currentPosition += incomeInThisBand;
+    }
+    
+    // If we've filled this band, move to the next one
+    if (currentPosition >= bandEnd) {
+      currentPosition = bandEnd;
+    }
+  }
+  
+  return Math.round(tax * 100) / 100;
+}
+
+/**
+ * Allocate PA and tax sequentially through income sources
+ * This mirrors HMRC's approach to calculating tax per source
+ */
+function allocateTaxSequentially(
+  sources: IncomeSource[],
+  projectedIncomes: number[],
+  totalPA: number
+): SourceTaxDetail[] {
+  let paRemaining = totalPA;
+  let taxablePosition = 0; // Track where we are in the tax bands
+  
+  const details: SourceTaxDetail[] = [];
+  
+  for (let i = 0; i < sources.length; i++) {
+    const source = sources[i];
+    const income = projectedIncomes[i];
+    
+    // Step 1: Allocate PA to this source
+    const paForThisSource = Math.min(paRemaining, income);
+    paRemaining -= paForThisSource;
+    
+    // Step 2: Calculate taxable income for this source
+    const taxableIncome = income - paForThisSource;
+    
+    // Step 3: Calculate tax due (from current position in bands)
+    const taxDue = calculateTaxForSlice(taxableIncome, taxablePosition);
+    
+    // Move position forward for next source
+    taxablePosition += taxableIncome;
+    
+    // Step 4: Determine tax paid
+    let taxPaid: number;
+    let notes: string;
+    
+    if (source.isRegular) {
+      // Regular income - assume balanced PAYE
+      taxPaid = taxDue;
+      notes = 'Balanced PAYE (ongoing)';
+    } else {
+      // One-off - use actual tax paid if provided
+      if (source.taxPaid !== undefined && source.taxPaid !== null) {
+        taxPaid = source.taxPaid;
+        notes = 'Actual tax deducted';
+      } else {
+        taxPaid = 0;
+        notes = 'No tax information provided';
+      }
+    }
+    
+    // Step 5: Calculate difference (refund/underpayment)
+    const difference = taxPaid - taxDue;
+    
+    details.push({
+      name: source.name,
+      income: Math.round(income * 100) / 100,
+      paUsed: Math.round(paForThisSource * 100) / 100,
+      taxableIncome: Math.round(taxableIncome * 100) / 100,
+      taxDue: Math.round(taxDue * 100) / 100,
+      taxPaid: Math.round(taxPaid * 100) / 100,
+      difference: Math.round(difference * 100) / 100,
+      notes
+    });
+  }
+  
+  return details;
+}
+
+/**
  * Main calculation function
  */
 export function calculateTax(sources: IncomeSource[], today: Date = new Date()): CalculationResult {
@@ -181,7 +306,6 @@ export function calculateTax(sources: IncomeSource[], today: Date = new Date()):
         daysWorked = projection.daysWorked;
         daysInYear = projection.daysInYear;
         
-        const dailyRate = source.incomeToDate / daysWorked;
         calculation = `£${source.incomeToDate.toFixed(2)} ÷ ${daysWorked} days worked × ${daysInYear} days in period = £${finalIncome.toFixed(2)}`;
       }
     } else {
@@ -228,52 +352,50 @@ export function calculateTax(sources: IncomeSource[], today: Date = new Date()):
   }
   breakdown.steps.push('');
   
-  // Step 3: Calculate Taxable Income
-  breakdown.steps.push('=== STEP 3: Calculate Taxable Income ===');
-  const taxableIncome = Math.max(0, totalIncome - personalAllowance);
-  breakdown.steps.push(`Taxable Income = Total Income - Personal Allowance`);
-  breakdown.steps.push(`£${totalIncome.toFixed(2)} - £${personalAllowance.toFixed(2)} = £${taxableIncome.toFixed(2)}`);
-  breakdown.steps.push('');
+  // Step 3: Sequential allocation of PA and tax per source
+  breakdown.steps.push('=== STEP 3: Allocate PA and Tax Per Source ===');
   
-  // Step 4: Calculate Tax Due
-  breakdown.steps.push('=== STEP 4: Calculate Tax Due ===');
+  // Get projected incomes for sequential allocation
+  const projectedIncomes = breakdown.sources.map(s => s.projectedOrActual);
+  const sourceDetails = allocateTaxSequentially(sources, projectedIncomes, personalAllowance);
   
-  if (taxableIncome === 0) {
-    breakdown.steps.push(`No taxable income, tax due: £0`);
-  } else {
-    let remainingIncome = taxableIncome;
-    let previousLimit = 0;
-    let totalTax = 0;
-    
-    for (const band of TAX_BANDS) {
-      const bandWidth = band.limit === Infinity ? Infinity : band.limit - previousLimit;
-      const incomeInBand = Math.min(remainingIncome, bandWidth);
-      
-      if (incomeInBand > 0) {
-        const taxInBand = incomeInBand * band.rate;
-        totalTax += taxInBand;
-        
-        const bandLabel = band.limit === Infinity ? `over £${previousLimit.toFixed(2)}` : `£${previousLimit.toFixed(2)} - £${band.limit.toFixed(2)}`;
-        breakdown.steps.push(`${band.name} (${bandLabel}): £${incomeInBand.toFixed(2)} × ${(band.rate * 100).toFixed(0)}% = £${taxInBand.toFixed(2)}`);
-        
-        remainingIncome -= incomeInBand;
-      }
-      
-      if (remainingIncome <= 0) break;
-      previousLimit = band.limit;
-    }
-    
-    breakdown.steps.push(`Total Tax Due: £${totalTax.toFixed(2)}`);
+  // Add detailed breakdown for each source
+  for (const detail of sourceDetails) {
+    breakdown.steps.push(`\n${detail.name}:`);
+    breakdown.steps.push(`  Income: £${detail.income.toFixed(2)}`);
+    breakdown.steps.push(`  PA Used: £${detail.paUsed.toFixed(2)}`);
+    breakdown.steps.push(`  Taxable: £${detail.taxableIncome.toFixed(2)}`);
+    breakdown.steps.push(`  Tax Due: £${detail.taxDue.toFixed(2)}`);
+    breakdown.steps.push(`  Tax Paid: £${detail.taxPaid.toFixed(2)}`);
+    breakdown.steps.push(`  Difference: £${detail.difference.toFixed(2)} (${detail.notes})`);
   }
   
-  const taxDue = calculateTaxDue(taxableIncome);
+  breakdown.steps.push('');
+  
+  // Step 4: Calculate totals
+  breakdown.steps.push('=== STEP 4: Summary ===');
+  
+  const taxableIncome = totalIncome - personalAllowance;
+  const taxDue = sourceDetails.reduce((sum, d) => sum + d.taxDue, 0);
+  const taxPaid = sourceDetails.reduce((sum, d) => sum + d.taxPaid, 0);
+  const netPosition = taxPaid - taxDue;
+  
+  breakdown.steps.push(`Total Income: £${totalIncome.toFixed(2)}`);
+  breakdown.steps.push(`Personal Allowance: £${personalAllowance.toFixed(2)}`);
+  breakdown.steps.push(`Taxable Income: £${taxableIncome.toFixed(2)}`);
+  breakdown.steps.push(`Total Tax Due: £${taxDue.toFixed(2)}`);
+  breakdown.steps.push(`Total Tax Paid: £${taxPaid.toFixed(2)}`);
+  breakdown.steps.push(`Net Position: £${netPosition.toFixed(2)} ${netPosition > 0 ? '(Refund)' : netPosition < 0 ? '(Owed)' : '(Balanced)'}`);
   
   return {
     totalIncome: Math.round(totalIncome * 100) / 100,
     personalAllowance: Math.round(personalAllowance * 100) / 100,
     taxableIncome: Math.round(taxableIncome * 100) / 100,
-    taxDue,
-    breakdown
+    taxDue: Math.round(taxDue * 100) / 100,
+    taxPaid: Math.round(taxPaid * 100) / 100,
+    netPosition: Math.round(netPosition * 100) / 100,
+    breakdown,
+    sourceDetails
   };
 }
 
