@@ -380,10 +380,11 @@ function App() {
                       <td>
                         <input
                           type="number"
-                          value={source.incomeToDate}
-                          onChange={(e) => updateSource(source.id, 'incomeToDate', parseFloat(e.target.value) || 0)}
+                          value={source.incomeToDate || ''}
+                          onChange={(e) => updateSource(source.id, 'incomeToDate', e.target.value === '' ? 0 : parseFloat(e.target.value))}
                           className="input-field numeric"
                           step="0.01"
+                          placeholder="0.00"
                         />
                       </td>
                       <td>
@@ -428,11 +429,11 @@ function App() {
                         <div className="projected-cell">
                           <input
                             type="number"
-                            value={source.projectedIncome !== undefined ? 
-                              source.projectedIncome.toFixed(2) : 
-                              projectedOrActual.toFixed(2)
+                            value={source.projectedIncome !== undefined && source.projectedIncome !== 0 ? 
+                              source.projectedIncome : 
+                              (projectedOrActual !== 0 ? projectedOrActual : '')
                             }
-                            onChange={(e) => updateSource(source.id, 'projectedIncome', parseFloat(e.target.value) || 0)}
+                            onChange={(e) => updateSource(source.id, 'projectedIncome', e.target.value === '' ? 0 : parseFloat(e.target.value))}
                             className="input-field numeric projected"
                             step="0.01"
                             placeholder="Auto-calculated"
@@ -446,8 +447,11 @@ function App() {
                       <td>
                         <input
                           type="number"
-                          value={source.taxPaid !== undefined ? source.taxPaid : (detail?.taxPaid || 0)}
-                          onChange={(e) => updateSource(source.id, 'taxPaid', parseFloat(e.target.value) || 0)}
+                          value={source.taxPaid !== undefined && source.taxPaid !== 0 ? 
+                            source.taxPaid : 
+                            (detail?.taxPaid && detail.taxPaid !== 0 ? detail.taxPaid : '')
+                          }
+                          onChange={(e) => updateSource(source.id, 'taxPaid', e.target.value === '' ? 0 : parseFloat(e.target.value))}
                           className="input-field numeric"
                           step="0.01"
                           placeholder={source.isRegular ? "Auto-balanced" : "Enter tax paid"}
@@ -575,10 +579,11 @@ function App() {
                       <td>
                         <input
                           type="number"
-                          value={deduction.amount}
-                          onChange={(e) => updateDeduction(deduction.id, 'amount', parseFloat(e.target.value) || 0)}
+                          value={deduction.amount || ''}
+                          onChange={(e) => updateDeduction(deduction.id, 'amount', e.target.value === '' ? 0 : parseFloat(e.target.value))}
                           className="input-field numeric"
                           step="0.01"
+                          placeholder="0.00"
                         />
                       </td>
                       <td>
@@ -658,10 +663,11 @@ function App() {
                       <td>
                         <input
                           type="number"
-                          value={adjustment.amount}
-                          onChange={(e) => updateAdjustment(adjustment.id, 'amount', parseFloat(e.target.value) || 0)}
+                          value={adjustment.amount || ''}
+                          onChange={(e) => updateAdjustment(adjustment.id, 'amount', e.target.value === '' ? 0 : parseFloat(e.target.value))}
                           className="input-field numeric"
                           step="0.01"
+                          placeholder="0.00"
                         />
                       </td>
                       <td>
