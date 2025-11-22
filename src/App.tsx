@@ -399,7 +399,8 @@ function App() {
               </thead>
               <tbody>
                 {sources.map((source, idx) => {
-                  const breakdown = result?.breakdown.sources.find(s => s.name === source.name);
+                  // Use index to match breakdown and detail (not name, as names can be duplicated)
+                  const breakdown = result?.breakdown.sources[idx];
                   const detail = result?.sourceDetails[idx];
                   const projectedOrActual = breakdown?.projectedOrActual || 0;
 
