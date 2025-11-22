@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import './App.css';
 import {
   IncomeSource,
@@ -28,7 +28,7 @@ const SCENARIOS = {
         isRegular: true,
         startDate: '2025-04-06',
         endDate: '2026-04-05',
-        payrollDate: 30
+        includeCurrentMonth: true
       }
     ],
     deductions: [],
@@ -44,7 +44,7 @@ const SCENARIOS = {
         isRegular: true,
         startDate: '2025-04-06',
         endDate: '2026-04-05',
-        payrollDate: 30
+        includeCurrentMonth: true
       },
       {
         id: '2',
@@ -53,7 +53,7 @@ const SCENARIOS = {
         isRegular: true,
         startDate: '2025-06-01',
         endDate: '2026-04-05',
-        payrollDate: 15
+        includeCurrentMonth: true
       }
     ],
     deductions: [
@@ -82,7 +82,7 @@ const SCENARIOS = {
         isRegular: true,
         startDate: '2025-04-06',
         endDate: '2026-04-05',
-        payrollDate: 30
+        includeCurrentMonth: true
       },
       {
         id: '2',
@@ -91,7 +91,7 @@ const SCENARIOS = {
         isRegular: false,
         startDate: '2025-04-06',
         endDate: '2026-04-05',
-        payrollDate: 1,
+        includeCurrentMonth: true,
         taxPaid: 3452.06  // Emergency 0T code over-taxation
       }
     ],
@@ -115,7 +115,7 @@ const SCENARIOS = {
         isRegular: true,
         startDate: '2025-04-06',
         endDate: '2026-04-05',
-        payrollDate: 28
+        includeCurrentMonth: true
       },
       {
         id: '2',
@@ -124,7 +124,7 @@ const SCENARIOS = {
         isRegular: false,
         startDate: '2025-04-06',
         endDate: '2026-04-05',
-        payrollDate: 1,
+        includeCurrentMonth: true,
         taxPaid: 11250  // 45% emergency tax rate
       }
     ],
@@ -155,7 +155,7 @@ const SCENARIOS = {
         isRegular: true,
         startDate: '2025-04-06',
         endDate: '2026-04-05',
-        payrollDate: 1
+        includeCurrentMonth: true
       },
       {
         id: '2',
@@ -164,7 +164,7 @@ const SCENARIOS = {
         isRegular: true,
         startDate: '2025-04-06',
         endDate: '2026-04-05',
-        payrollDate: 15
+        includeCurrentMonth: true
       },
       {
         id: '3',
@@ -173,8 +173,35 @@ const SCENARIOS = {
         isRegular: false,
         startDate: '2025-04-06',
         endDate: '2026-04-05',
-        payrollDate: 1,
+        includeCurrentMonth: true,
         taxPaid: 9000  // 45% emergency tax
+      }
+    ],
+    deductions: [],
+    adjustments: []
+  },
+  scottishEarner: {
+    name: 'Scottish Earner',
+    useScottishBands: true,
+    sources: [
+      {
+        id: '1',
+        name: 'Scottish Employment',
+        incomeToDate: 20000,
+        isRegular: true,
+        startDate: '2025-04-06',
+        endDate: '2026-04-05',
+        includeCurrentMonth: true
+      },
+      {
+        id: '2',
+        name: 'Seasonal Overtime',
+        incomeToDate: 4000,
+        isRegular: false,
+        startDate: '2025-04-06',
+        endDate: '2026-04-05',
+        includeCurrentMonth: true,
+        taxPaid: 800
       }
     ],
     deductions: [],
@@ -187,26 +214,38 @@ function App() {
   const [deductions, setDeductions] = useState<Deduction[]>([]);
   const [adjustments, setAdjustments] = useState<TaxAdjustment[]>([]);
   const [result, setResult] = useState<CalculationResult | null>(null);
+  const [useScottishBands, setUseScottishBands] = useState(false);
   const [showBreakdown, setShowBreakdown] = useState(true);
   const [showDeductions, setShowDeductions] = useState(false);
   const [showAdjustments, setShowAdjustments] = useState(false);
 
-  // Calculate whenever sources, deductions, or adjustments change
-  const recalculate = (newSources: IncomeSource[], newDeductions: Deduction[] = deductions, newAdjustments: TaxAdjustment[] = adjustments) => {
-    setSources(newSources);
-    setDeductions(newDeductions);
-    setAdjustments(newAdjustments);
-    if (newSources.length > 0) {
-      const calculationResult = calculateTax(newSources, newDeductions, newAdjustments);
-      setResult(calculationResult);
+  useEffect(() => {
+    if (sources.length > 0) {
+      const recalculated = calculateTax(sources, deductions, adjustments, {
+        useScottishBands
+      });
+      setResult(recalculated);
     } else {
       setResult(null);
     }
+  }, [sources, deductions, adjustments, useScottishBands]);
+
+  // Calculate whenever sources, deductions, or adjustments change
+  const recalculate = (
+    newSources: IncomeSource[],
+    newDeductions: Deduction[] = deductions,
+    newAdjustments: TaxAdjustment[] = adjustments
+  ) => {
+    setSources(newSources);
+    setDeductions(newDeductions);
+    setAdjustments(newAdjustments);
   };
 
   // Load a scenario
   const loadScenario = (scenarioKey: keyof typeof SCENARIOS) => {
     const scenario = SCENARIOS[scenarioKey];
+    const nextScottish = (scenario as { useScottishBands?: boolean }).useScottishBands ?? false;
+    setUseScottishBands(nextScottish);
     recalculate(
       scenario.sources as IncomeSource[], 
       scenario.deductions as Deduction[], 
@@ -223,7 +262,7 @@ function App() {
       isRegular: true,
       startDate: TAX_YEAR_START.toISOString().split('T')[0],
       endDate: TAX_YEAR_END.toISOString().split('T')[0],
-      payrollDate: 30
+      includeCurrentMonth: true
     };
     recalculate([...sources, newSource], deductions, adjustments);
   };
@@ -322,7 +361,17 @@ function App() {
       <section className="table-section">
         <div className="table-header">
           <h2>Income Sources</h2>
-          <button onClick={addSource} className="add-btn">+ Add Income Source</button>
+          <div className="table-actions">
+            <label className="region-toggle">
+              <input
+                type="checkbox"
+                checked={useScottishBands}
+                onChange={(e) => setUseScottishBands(e.target.checked)}
+              />
+              <span>Use Scottish tax bands</span>
+            </label>
+            <button onClick={addSource} className="add-btn">+ Add Income Source</button>
+          </div>
         </div>
 
         {sources.length === 0 ? (
@@ -339,7 +388,7 @@ function App() {
                   <th>Income Earned So Far (£)</th>
                   <th>Start Date</th>
                   <th>End Date</th>
-                  <th>Payroll Date (Day)</th>
+                  <th>Include Current Month?</th>
                   <th>Projected/Actual Income (£)</th>
                   <th>Tax Paid (£)</th>
                   <th>PA Used (£)</th>
@@ -413,14 +462,15 @@ function App() {
                       </td>
                       <td>
                         {source.isRegular ? (
-                          <input
-                            type="number"
-                            value={source.payrollDate}
-                            onChange={(e) => updateSource(source.id, 'payrollDate', parseInt(e.target.value) || 1)}
-                            className="input-field numeric"
-                            min="1"
-                            max="31"
-                          />
+                          <button
+                            type="button"
+                            onClick={() => updateSource(source.id, 'includeCurrentMonth', !source.includeCurrentMonth)}
+                            className={`include-toggle ${source.includeCurrentMonth ? 'on' : 'off'}`}
+                            aria-pressed={source.includeCurrentMonth}
+                            title={source.includeCurrentMonth ? 'Click to exclude current month from projection' : 'Click to include current month in projection'}
+                          >
+                            {source.includeCurrentMonth ? 'Include' : 'Exclude'}
+                          </button>
                         ) : (
                           <span className="disabled-cell">N/A</span>
                         )}
@@ -728,6 +778,10 @@ function App() {
 
               <div className="summary-section">
                 <h3>Tax Calculation</h3>
+                <div className="summary-line">
+                  <span className="summary-label">Tax Region</span>
+                  <span className="summary-value textual">{useScottishBands ? 'Scotland (NSND rates)' : 'England / Wales / Northern Ireland'}</span>
+                </div>
                 <div className="summary-line highlight-line">
                   <span className="summary-label">Final Taxable Income</span>
                   <span className="summary-value">£{result.taxableIncomeAfterDeductions.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>

@@ -6,16 +6,31 @@
 // Constants for 2025/26 tax year
 export const TAX_YEAR_START = new Date('2025-04-06');
 export const TAX_YEAR_END = new Date('2026-04-05');
-export const TAX_YEAR_DAYS = 366; // 2025/26 includes leap year day
 export const PERSONAL_ALLOWANCE = 12570;
 export const TAPER_THRESHOLD = 100000;
 export const TAPER_LIMIT = 125140;
 
+export interface TaxBand {
+  limit: number;
+  rate: number;
+  name: string;
+}
+
 // UK Tax Bands for 2025/26 (England, Wales, NI)
-export const TAX_BANDS = [
+export const TAX_BANDS: TaxBand[] = [
   { limit: 37700, rate: 0.20, name: 'Basic Rate' },
   { limit: 125140, rate: 0.40, name: 'Higher Rate' },
   { limit: Infinity, rate: 0.45, name: 'Additional Rate' }
+];
+
+// Scottish Tax Bands for 2025/26 (non-savings, non-dividend)
+export const SCOTTISH_TAX_BANDS: TaxBand[] = [
+  { limit: 2306, rate: 0.19, name: 'Starter Rate' },
+  { limit: 13991, rate: 0.20, name: 'Basic Rate' },
+  { limit: 31092, rate: 0.21, name: 'Intermediate Rate' },
+  { limit: 62430, rate: 0.42, name: 'Higher Rate' },
+  { limit: 125140, rate: 0.45, name: 'Advanced Rate' },
+  { limit: Infinity, rate: 0.48, name: 'Top Rate' }
 ];
 
 export interface IncomeSource {
@@ -25,7 +40,7 @@ export interface IncomeSource {
   isRegular: boolean;
   startDate: string;
   endDate: string;
-  payrollDate: number; // day of month (1-31)
+  includeCurrentMonth: boolean;
   projectedIncome?: number; // user can override
   taxPaid?: number; // actual tax paid (for one-offs or user override)
 }
@@ -97,35 +112,27 @@ export function daysBetween(start: Date, end: Date): number {
 }
 
 /**
- * Check if current month's payroll should be included in "income to date"
- * If today < payroll date this month, payroll hasn't happened yet, so exclude current month
- */
-export function shouldIncludeCurrentMonth(payrollDay: number, today: Date = new Date()): boolean {
-  const currentDay = today.getDate();
-  return currentDay >= payrollDay;
-}
-
-/**
  * Calculate projected annual income for regular income sources
  */
 export function calculateProjectedIncome(
   incomeToDate: number,
   startDate: string,
-  payrollDay: number,
+  includeCurrentMonth: boolean,
   today: Date = new Date()
 ): { projected: number; daysWorked: number; daysInYear: number } {
   const start = new Date(startDate);
   
   // Determine the "as of" date for calculations
-  let asOfDate = new Date(today);
-  
-  // If payroll hasn't happened this month, use end of last month
-  if (!shouldIncludeCurrentMonth(payrollDay, today)) {
-    asOfDate = new Date(today.getFullYear(), today.getMonth(), 0); // last day of previous month
+  let asOfDate = includeCurrentMonth
+    ? new Date(today)
+    : new Date(today.getFullYear(), today.getMonth(), 0); // last day of previous month
+
+  if (asOfDate < start) {
+    asOfDate = new Date(start);
   }
   
   // Calculate days worked from start date to as-of date
-  const daysWorked = daysBetween(start, asOfDate);
+  const daysWorked = Math.max(1, daysBetween(start, asOfDate));
   
   // Calculate total days in employment period (start to end of tax year)
   const endDate = new Date(TAX_YEAR_END);
@@ -156,16 +163,16 @@ export function calculatePersonalAllowance(totalIncome: number): number {
 }
 
 /**
- * Calculate tax due based on UK tax bands
+ * Calculate tax due based on supplied tax bands
  */
-export function calculateTaxDue(taxableIncome: number): number {
+export function calculateTaxDue(taxableIncome: number, bands: TaxBand[] = TAX_BANDS): number {
   if (taxableIncome <= 0) return 0;
   
   let tax = 0;
   let remainingIncome = taxableIncome;
   let previousLimit = 0;
   
-  for (const band of TAX_BANDS) {
+  for (const band of bands) {
     const bandWidth = band.limit - previousLimit;
     const incomeInBand = Math.min(remainingIncome, bandWidth);
     
@@ -187,7 +194,8 @@ export function calculateTaxDue(taxableIncome: number): number {
  */
 function calculateTaxForSlice(
   incomeAmount: number,
-  startingPosition: number
+  startingPosition: number,
+  bands: TaxBand[]
 ): number {
   if (incomeAmount <= 0) return 0;
   
@@ -195,7 +203,7 @@ function calculateTaxForSlice(
   let remaining = incomeAmount;
   let currentPosition = startingPosition;
   
-  for (const band of TAX_BANDS) {
+  for (const band of bands) {
     if (remaining <= 0) break;
     
     // Determine where this band starts and ends
@@ -230,7 +238,8 @@ function calculateTaxForSlice(
 function allocateTaxSequentially(
   sources: IncomeSource[],
   projectedIncomes: number[],
-  totalPA: number
+  totalPA: number,
+  taxBands: TaxBand[]
 ): SourceTaxDetail[] {
   let paRemaining = totalPA;
   let taxablePosition = 0; // Track where we are in the tax bands
@@ -249,7 +258,7 @@ function allocateTaxSequentially(
     const taxableIncome = income - paForThisSource;
     
     // Step 3: Calculate tax due (from current position in bands)
-    const taxDue = calculateTaxForSlice(taxableIncome, taxablePosition);
+    const taxDue = calculateTaxForSlice(taxableIncome, taxablePosition, taxBands);
     
     // Move position forward for next source
     taxablePosition += taxableIncome;
@@ -293,12 +302,21 @@ function allocateTaxSequentially(
 /**
  * Main calculation function
  */
+export interface CalculateTaxOptions {
+  today?: Date;
+  useScottishBands?: boolean;
+}
+
 export function calculateTax(
   sources: IncomeSource[], 
   deductions: Deduction[] = [],
   adjustments: TaxAdjustment[] = [],
-  today: Date = new Date()
+  options: CalculateTaxOptions = {}
 ): CalculationResult {
+  const today = options.today ?? new Date();
+  const taxBands = options.useScottishBands ? SCOTTISH_TAX_BANDS : TAX_BANDS;
+  const regionLabel = options.useScottishBands ? 'Scottish' : 'rUK';
+
   const breakdown: CalculationBreakdown = {
     steps: [],
     sources: []
@@ -321,17 +339,19 @@ export function calculateTax(
         finalIncome = source.projectedIncome;
         calculation = `User override: £${finalIncome.toFixed(2)}`;
       } else {
+        const includeMonth = source.includeCurrentMonth ?? true;
         const projection = calculateProjectedIncome(
           source.incomeToDate,
           source.startDate,
-          source.payrollDate,
+          includeMonth,
           today
         );
         finalIncome = projection.projected;
         daysWorked = projection.daysWorked;
         daysInYear = projection.daysInYear;
         
-        calculation = `£${source.incomeToDate.toFixed(2)} ÷ ${daysWorked} days worked × ${daysInYear} days in period = £${finalIncome.toFixed(2)}`;
+        const monthNote = includeMonth ? 'including current month' : 'excluding current month';
+        calculation = `£${source.incomeToDate.toFixed(2)} ÷ ${daysWorked} days worked × ${daysInYear} days in period = £${finalIncome.toFixed(2)} (${monthNote})`;
       }
     } else {
       // One-off payment - use actual income
@@ -379,10 +399,11 @@ export function calculateTax(
   
   // Step 3: Sequential allocation of PA and tax per source
   breakdown.steps.push('=== STEP 3: Allocate PA and Tax Per Source ===');
+  breakdown.steps.push(`Using ${regionLabel} tax bands`);
   
   // Get projected incomes for sequential allocation
   const projectedIncomes = breakdown.sources.map(s => s.projectedOrActual);
-  const sourceDetails = allocateTaxSequentially(sources, projectedIncomes, personalAllowance);
+  const sourceDetails = allocateTaxSequentially(sources, projectedIncomes, personalAllowance, taxBands);
   
   // Add detailed breakdown for each source
   for (const detail of sourceDetails) {
@@ -420,8 +441,8 @@ export function calculateTax(
   breakdown.steps.push('=== STEP 5: Calculate Tax on Income ===');
   
   // Recalculate tax based on reduced taxable income
-  const taxDueOnIncome = calculateTaxDue(taxableIncomeAfterDeductions);
-  breakdown.steps.push(`Tax due on £${taxableIncomeAfterDeductions.toFixed(2)}: £${taxDueOnIncome.toFixed(2)}`);
+  const taxDueOnIncome = calculateTaxDue(taxableIncomeAfterDeductions, taxBands);
+  breakdown.steps.push(`Region (${regionLabel}) tax due on £${taxableIncomeAfterDeductions.toFixed(2)}: £${taxDueOnIncome.toFixed(2)}`);
   breakdown.steps.push('');
   
   // Step 6: Apply Adjustments (additional tax owed)

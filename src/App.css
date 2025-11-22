@@ -69,6 +69,28 @@ header p {
   margin-bottom: 20px;
 }
 
+.table-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.region-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: #333;
+  cursor: pointer;
+}
+
+.region-toggle input {
+  width: 18px;
+  height: 18px;
+}
+
 .table-header h2 {
   color: #333;
 }
@@ -157,7 +179,7 @@ header p {
 
 .income-table th:nth-child(6),
 .income-table td:nth-child(6) {
-  width: 120px; /* Payroll Date */
+  width: 160px; /* Include Month Toggle */
 }
 
 .income-table th:nth-child(7),
@@ -188,6 +210,31 @@ header p {
 .income-table th:nth-child(12),
 .income-table td:nth-child(12) {
   width: 80px; /* Actions */
+}
+
+.include-toggle {
+  padding: 6px 16px;
+  border-radius: 20px;
+  border: 1px solid transparent;
+  background: #e9f3ff;
+  color: #0066cc;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.include-toggle.on {
+  border-color: rgba(0, 102, 204, 0.35);
+}
+
+.include-toggle.off {
+  background: #f7f7f7;
+  color: #666;
+  border-color: #ddd;
+}
+
+.include-toggle:hover {
+  box-shadow: 0 0 0 2px rgba(0, 102, 204, 0.15);
 }
 
 .input-field {
@@ -708,6 +755,11 @@ footer {
   font-family: 'Courier New', monospace;
 }
 
+.summary-value.textual {
+  color: #333;
+  font-family: inherit;
+}
+
 .net-position-line .summary-label,
 .net-position-line .summary-value {
   color: white;
@@ -739,6 +791,15 @@ footer {
     flex-direction: column;
     align-items: flex-start;
     gap: 15px;
+  }
+
+  .table-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .region-toggle {
+    font-size: 0.85rem;
   }
 
   .scenario-buttons {
