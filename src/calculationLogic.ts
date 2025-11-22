@@ -127,12 +127,31 @@ export function calculateProjectedIncome(
     ? new Date(today)
     : new Date(today.getFullYear(), today.getMonth(), 0); // last day of previous month
 
+  // If start date is after the calculated asOfDate (e.g., started mid-month with "exclude current month"),
+  // we should use today instead to have meaningful data
   if (asOfDate < start) {
-    asOfDate = new Date(start);
+    // Override to use today - we need at least some days worked for a reasonable projection
+    asOfDate = new Date(today);
+    
+    // If today is also before or equal to start date, the income hasn't actually started yet
+    if (asOfDate <= start) {
+      // Not enough data for projection - return minimal values
+      const endDate = new Date(TAX_YEAR_END);
+      const daysInYear = Math.max(1, daysBetween(start, endDate));
+      return { 
+        projected: incomeToDate, // Just use what we have
+        daysWorked: 1, 
+        daysInYear 
+      };
+    }
   }
   
   // Calculate days worked from start date to as-of date
   const daysWorked = Math.max(1, daysBetween(start, asOfDate));
+  
+  // Validation: if daysWorked is very small (< 7 days), this might lead to unrealistic projections
+  // In such cases, we should be more conservative
+  const MIN_DAYS_FOR_PROJECTION = 7;
   
   // Calculate total days in employment period (start to end of tax year)
   const endDate = new Date(TAX_YEAR_END);
@@ -140,7 +159,28 @@ export function calculateProjectedIncome(
   
   // Project annual income
   const dailyRate = incomeToDate / daysWorked;
-  const projected = Math.round(dailyRate * daysInYear * 100) / 100;
+  let projected = dailyRate * daysInYear;
+  
+  // If we have very few days of data, cap the projection to be more conservative
+  // This prevents extreme annualization from a few days of data
+  if (daysWorked < MIN_DAYS_FOR_PROJECTION && incomeToDate > 0) {
+    // Use a more conservative approach: assume the income rate, but don't over-extrapolate
+    // Cap at a reasonable multiple (e.g., 52x weekly income if we only have 1 week of data)
+    const weeksWorked = daysWorked / 7;
+    const weeklyRate = incomeToDate / weeksWorked;
+    const weeksRemaining = daysInYear / 7;
+    const conservativeProjection = weeklyRate * weeksRemaining;
+    
+    // Use the lower of the two projections to be conservative
+    projected = Math.min(projected, conservativeProjection);
+  }
+  
+  projected = Math.round(projected * 100) / 100;
+  
+  // Validation: ensure we don't return NaN or Infinity
+  if (!isFinite(projected) || isNaN(projected)) {
+    projected = incomeToDate; // Fallback to actual income
+  }
   
   return { projected, daysWorked, daysInYear };
 }
@@ -478,22 +518,28 @@ export function calculateTax(
   breakdown.steps.push(`Total Tax Paid: £${taxPaid.toFixed(2)}`);
   breakdown.steps.push(`Net Position: £${netPosition.toFixed(2)} ${netPosition > 0 ? '(Refund)' : netPosition < 0 ? '(Owed)' : '(Balanced)'}`);
   
+  // Helper function to safely round and validate numbers
+  const safeRound = (num: number): number => {
+    if (!isFinite(num) || isNaN(num)) return 0;
+    return Math.round(num * 100) / 100;
+  };
+  
   return {
-    totalIncome: Math.round(totalIncome * 100) / 100,
-    personalAllowance: Math.round(personalAllowance * 100) / 100,
-    totalDeductions: Math.round(totalDeductions * 100) / 100,
-    taxableIncomeBeforeDeductions: Math.round(taxableIncomeBeforeDeductions * 100) / 100,
-    taxableIncomeAfterDeductions: Math.round(taxableIncomeAfterDeductions * 100) / 100,
-    taxDueOnIncome: Math.round(taxDueOnIncome * 100) / 100,
-    totalAdjustments: Math.round(totalAdjustments * 100) / 100,
-    finalTaxDue: Math.round(finalTaxDue * 100) / 100,
-    taxPaid: Math.round(taxPaid * 100) / 100,
-    netPosition: Math.round(netPosition * 100) / 100,
+    totalIncome: safeRound(totalIncome),
+    personalAllowance: safeRound(personalAllowance),
+    totalDeductions: safeRound(totalDeductions),
+    taxableIncomeBeforeDeductions: safeRound(taxableIncomeBeforeDeductions),
+    taxableIncomeAfterDeductions: safeRound(taxableIncomeAfterDeductions),
+    taxDueOnIncome: safeRound(taxDueOnIncome),
+    totalAdjustments: safeRound(totalAdjustments),
+    finalTaxDue: safeRound(finalTaxDue),
+    taxPaid: safeRound(taxPaid),
+    netPosition: safeRound(netPosition),
     breakdown,
     sourceDetails,
     // Legacy fields for backwards compatibility
-    taxableIncome: Math.round(taxableIncomeAfterDeductions * 100) / 100,
-    taxDue: Math.round(finalTaxDue * 100) / 100
+    taxableIncome: safeRound(taxableIncomeAfterDeductions),
+    taxDue: safeRound(finalTaxDue)
   };
 }
 
