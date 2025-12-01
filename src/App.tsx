@@ -257,7 +257,7 @@ function App() {
   const addSource = () => {
     const newSource: IncomeSource = {
       id: Date.now().toString(),
-      name: 'New Income Source',
+      name: '',
       incomeToDate: 0,
       isRegular: true,
       startDate: TAX_YEAR_START.toISOString().split('T')[0],
@@ -265,6 +265,16 @@ function App() {
       includeCurrentMonth: true
     };
     recalculate([...sources, newSource], deductions, adjustments);
+  };
+
+  // Clear all data
+  const clearAllData = () => {
+    if (window.confirm('Are you sure you want to clear all data? This will remove all income sources, deductions, and adjustments.')) {
+      setSources([]);
+      setDeductions([]);
+      setAdjustments([]);
+      setResult(null);
+    }
   };
 
   // Update a source
@@ -288,11 +298,24 @@ function App() {
     recalculate(sources.filter(s => s.id !== id), deductions, adjustments);
   };
 
+  // Helper function to get description from deduction category
+  const getDeductionDescription = (category: Deduction['category']): string => {
+    const descriptions: Record<Deduction['category'], string> = {
+      job_expenses: 'Job Expenses',
+      professional_subs: 'Professional Subscriptions',
+      fre: 'Flat Rate Expenses',
+      marriage_allowance: 'Marriage Allowance',
+      gift_aid: 'Gift Aid',
+      other: ''
+    };
+    return descriptions[category];
+  };
+
   // Deduction CRUD
   const addDeduction = () => {
     const newDeduction: Deduction = {
       id: Date.now().toString(),
-      description: 'New Deduction',
+      description: '',
       amount: 0,
       category: 'other'
     };
@@ -301,9 +324,17 @@ function App() {
   };
 
   const updateDeduction = (id: string, field: keyof Deduction, value: any) => {
-    const newDeductions = deductions.map(d => 
-      d.id === id ? { ...d, [field]: value } : d
-    );
+    const newDeductions = deductions.map(d => {
+      if (d.id === id) {
+        const updated = { ...d, [field]: value };
+        // Auto-populate description when category changes
+        if (field === 'category') {
+          updated.description = getDeductionDescription(value);
+        }
+        return updated;
+      }
+      return d;
+    });
     recalculate(sources, newDeductions, adjustments);
   };
 
@@ -312,11 +343,23 @@ function App() {
     recalculate(sources, newDeductions, adjustments);
   };
 
+  // Helper function to get description from adjustment type
+  const getAdjustmentDescription = (type: TaxAdjustment['type']): string => {
+    const descriptions: Record<TaxAdjustment['type'], string> = {
+      underpayment: 'Prior Year Underpayment',
+      untaxed_interest: 'Untaxed Interest',
+      benefit_in_kind: 'Benefit in Kind',
+      state_benefits: 'State Benefits',
+      other: ''
+    };
+    return descriptions[type];
+  };
+
   // Adjustment CRUD
   const addAdjustment = () => {
     const newAdjustment: TaxAdjustment = {
       id: Date.now().toString(),
-      description: 'New Adjustment',
+      description: '',
       amount: 0,
       type: 'other'
     };
@@ -325,9 +368,17 @@ function App() {
   };
 
   const updateAdjustment = (id: string, field: keyof TaxAdjustment, value: any) => {
-    const newAdjustments = adjustments.map(a => 
-      a.id === id ? { ...a, [field]: value } : a
-    );
+    const newAdjustments = adjustments.map(a => {
+      if (a.id === id) {
+        const updated = { ...a, [field]: value };
+        // Auto-populate description when type changes
+        if (field === 'type') {
+          updated.description = getAdjustmentDescription(value);
+        }
+        return updated;
+      }
+      return a;
+    });
     recalculate(sources, deductions, newAdjustments);
   };
 
@@ -356,6 +407,13 @@ function App() {
             </button>
           ))}
         </div>
+        {(sources.length > 0 || deductions.length > 0 || adjustments.length > 0) && (
+          <div className="clear-all-container">
+            <button onClick={clearAllData} className="clear-all-btn">
+              🗑️ Clear All Data
+            </button>
+          </div>
+        )}
       </section>
 
       <section className="table-section">
