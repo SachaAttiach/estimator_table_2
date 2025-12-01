@@ -607,7 +607,18 @@ footer {
   background: #e9ecef;
 }
 
-.section-header h2 {
+/* Static section header (not collapsible) */
+.section-header-static {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  background: #f8f9fa;
+  border-bottom: 2px solid #e0e0e0;
+}
+
+.section-header h2,
+.section-header-static h2 {
   display: flex;
   align-items: center;
   gap: 10px;

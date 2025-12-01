@@ -217,8 +217,6 @@ function App() {
   const [result, setResult] = useState<CalculationResult | null>(null);
   const [useScottishBands, setUseScottishBands] = useState(false);
   const [showBreakdown, setShowBreakdown] = useState(true);
-  const [showDeductions, setShowDeductions] = useState(false);
-  const [showAdjustments, setShowAdjustments] = useState(false);
 
   useEffect(() => {
     if (sources.length > 0) {
@@ -629,11 +627,11 @@ function App() {
         )}
       </section>
 
-      {/* Deductions Section */}
+      {/* Allowances Section (formerly Deductions) */}
       <section className="deductions-section">
-        <div className="section-header" onClick={() => setShowDeductions(!showDeductions)}>
+        <div className="section-header-static">
           <h2>
-            {showDeductions ? '▼' : '▶'} Deductions
+            Allowances
             {deductions.length > 0 && (
               <span className="section-count">
                 ({deductions.length} item{deductions.length !== 1 ? 's' : ''} · 
@@ -641,27 +639,26 @@ function App() {
               </span>
             )}
           </h2>
-          <button onClick={(e) => { e.stopPropagation(); addDeduction(); }} className="add-btn-small">
-            + Add Deduction
+          <button onClick={addDeduction} className="add-btn-small">
+            + Add Allowance
           </button>
         </div>
 
-        {showDeductions && (
-          <div className="subsection-content">
-            {deductions.length === 0 ? (
-              <p className="empty-message">No deductions. Click "+ Add Deduction" to add job expenses, professional subscriptions, etc.</p>
-            ) : (
-              <table className="simple-table">
-                <thead>
-                  <tr>
-                    <th>Description</th>
-                    <th>Category</th>
-                    <th>Amount (£)</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {deductions.map((deduction) => (
+        <div className="subsection-content">
+          {deductions.length === 0 ? (
+            <p className="empty-message">No allowances. Click "+ Add Allowance" to add job expenses, professional subscriptions, etc.</p>
+          ) : (
+            <table className="simple-table">
+              <thead>
+                <tr>
+                  <th>Description</th>
+                  <th>Category</th>
+                  <th>Amount (£)</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {deductions.map((deduction) => (
                     <tr key={deduction.id}>
                       <td>
                         <input
@@ -710,15 +707,14 @@ function App() {
                 </tbody>
               </table>
             )}
-          </div>
-        )}
+        </div>
       </section>
 
-      {/* Adjustments Section */}
+      {/* Deductions Section (formerly Additional Tax Owed) */}
       <section className="adjustments-section">
-        <div className="section-header" onClick={() => setShowAdjustments(!showAdjustments)}>
+        <div className="section-header-static">
           <h2>
-            {showAdjustments ? '▼' : '▶'} Additional Tax Owed
+            Deductions
             {adjustments.length > 0 && (
               <span className="section-count">
                 ({adjustments.length} item{adjustments.length !== 1 ? 's' : ''} · 
@@ -726,27 +722,26 @@ function App() {
               </span>
             )}
           </h2>
-          <button onClick={(e) => { e.stopPropagation(); addAdjustment(); }} className="add-btn-small">
-            + Add Adjustment
+          <button onClick={addAdjustment} className="add-btn-small">
+            + Add Deduction
           </button>
         </div>
 
-        {showAdjustments && (
-          <div className="subsection-content">
-            {adjustments.length === 0 ? (
-              <p className="empty-message">No additional tax owed. Click "+ Add Adjustment" to add prior underpayments, untaxed interest, etc.</p>
-            ) : (
-              <table className="simple-table">
-                <thead>
-                  <tr>
-                    <th>Description</th>
-                    <th>Type</th>
-                    <th>Amount (£) <span style={{ fontWeight: 'normal', fontSize: '0.85em' }}>*</span></th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {adjustments.map((adjustment) => (
+        <div className="subsection-content">
+          {adjustments.length === 0 ? (
+            <p className="empty-message">No deductions. Click "+ Add Deduction" to add prior underpayments, untaxed interest, etc.</p>
+          ) : (
+            <table className="simple-table">
+              <thead>
+                <tr>
+                  <th>Description</th>
+                  <th>Type</th>
+                  <th>Amount (£) <span style={{ fontWeight: 'normal', fontSize: '0.85em' }}>*</span></th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {adjustments.map((adjustment) => (
                     <tr key={adjustment.id}>
                       <td>
                         <input
@@ -801,9 +796,7 @@ function App() {
               * For <strong>Untaxed Interest, Benefits in Kind, and State Benefits</strong>: enter the income amount (tax will be calculated at your marginal rate). 
               For <strong>Prior Year Underpayments and Other</strong>: enter the tax amount directly.
             </p>
-            <button onClick={addAdjustment} className="add-btn-small">+ Add Adjustment</button>
-          </div>
-        )}
+        </div>
       </section>
 
       {result && (
@@ -830,7 +823,7 @@ function App() {
 
               {result.totalDeductions > 0 && (
                 <div className="summary-section">
-                  <h3>Deductions</h3>
+                  <h3>Allowances</h3>
                   {deductions.map((d) => (
                     <div key={d.id} className="summary-line">
                       <span className="summary-label">{d.description}</span>
@@ -838,7 +831,7 @@ function App() {
                     </div>
                   ))}
                   <div className="summary-line subtotal">
-                    <span className="summary-label">Total Deductions</span>
+                    <span className="summary-label">Total Allowances</span>
                     <span className="summary-value">-£{result.totalDeductions.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   </div>
                 </div>
@@ -862,7 +855,7 @@ function App() {
 
               {result.totalAdjustments > 0 && (
                 <div className="summary-section">
-                  <h3>Additional Tax Owed</h3>
+                  <h3>Deductions</h3>
                   {adjustments.map((a) => (
                     <div key={a.id} className="summary-line">
                       <span className="summary-label">{a.description}</span>
@@ -870,7 +863,7 @@ function App() {
                     </div>
                   ))}
                   <div className="summary-line subtotal">
-                    <span className="summary-label">Total Additional Tax</span>
+                    <span className="summary-label">Total Deductions</span>
                     <span className="summary-value">+£{result.totalAdjustments.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   </div>
                 </div>
