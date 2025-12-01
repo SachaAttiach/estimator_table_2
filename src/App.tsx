@@ -7,7 +7,8 @@ import {
   calculateTax,
   CalculationResult,
   TAX_YEAR_START,
-  TAX_YEAR_END
+  TAX_YEAR_END,
+  isAdjustmentTaxableIncome
 } from './calculationLogic';
 
 // Preloaded scenarios
@@ -740,7 +741,7 @@ function App() {
                   <tr>
                     <th>Description</th>
                     <th>Type</th>
-                    <th>Amount (£)</th>
+                    <th>Amount (£) <span style={{ fontWeight: 'normal', fontSize: '0.85em' }}>*</span></th>
                     <th>Actions</th>
                   </tr>
                 </thead>
@@ -776,7 +777,10 @@ function App() {
                           onChange={(e) => updateAdjustment(adjustment.id, 'amount', e.target.value === '' ? 0 : parseFloat(e.target.value))}
                           className="input-field numeric"
                           step="0.01"
-                          placeholder="0.00"
+                          placeholder={isAdjustmentTaxableIncome(adjustment.type) ? "Income amount" : "Tax amount"}
+                          title={isAdjustmentTaxableIncome(adjustment.type) 
+                            ? "Enter the taxable income amount (tax will be calculated at your marginal rate)" 
+                            : "Enter the additional tax amount directly"}
                         />
                       </td>
                       <td>
@@ -793,6 +797,11 @@ function App() {
                 </tbody>
               </table>
             )}
+            <p style={{ fontSize: '0.9em', marginTop: '10px', fontStyle: 'italic', color: '#666' }}>
+              * For <strong>Untaxed Interest, Benefits in Kind, and State Benefits</strong>: enter the income amount (tax will be calculated at your marginal rate). 
+              For <strong>Prior Year Underpayments and Other</strong>: enter the tax amount directly.
+            </p>
+            <button onClick={addAdjustment} className="add-btn-small">+ Add Adjustment</button>
           </div>
         )}
       </section>

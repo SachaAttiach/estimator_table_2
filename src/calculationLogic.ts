@@ -59,6 +59,13 @@ export interface TaxAdjustment {
   type: 'underpayment' | 'untaxed_interest' | 'benefit_in_kind' | 'state_benefits' | 'other';
 }
 
+/**
+ * Helper to determine if an adjustment type represents taxable income (vs direct tax)
+ */
+export function isAdjustmentTaxableIncome(type: TaxAdjustment['type']): boolean {
+  return type === 'untaxed_interest' || type === 'benefit_in_kind' || type === 'state_benefits';
+}
+
 export interface SourceTaxDetail {
   name: string;
   income: number;
@@ -226,6 +233,43 @@ export function calculateTaxDue(taxableIncome: number, bands: TaxBand[] = TAX_BA
   }
   
   return Math.round(tax * 100) / 100; // round to 2dp
+}
+
+/**
+ * Calculate the marginal tax rate for a given taxable income level
+ * This determines what rate applies to the next pound of income
+ */
+export function calculateMarginalRate(taxableIncome: number, bands: TaxBand[] = TAX_BANDS): number {
+  if (taxableIncome < 0) return 0;
+  
+  for (const band of bands) {
+    // If the current taxable income falls within this band, this is the marginal rate
+    if (taxableIncome < band.limit) {
+      return band.rate;
+    }
+  }
+  
+  // If we've gone through all bands, return the highest rate
+  return bands[bands.length - 1].rate;
+}
+
+/**
+ * Calculate incremental tax on additional taxable income
+ * This applies the marginal rate(s) to new income added on top of existing taxable income
+ */
+export function calculateIncrementalTax(
+  existingTaxableIncome: number,
+  additionalIncome: number,
+  bands: TaxBand[] = TAX_BANDS
+): number {
+  if (additionalIncome <= 0) return 0;
+  
+  // Calculate tax with and without the additional income
+  const taxWithout = calculateTaxDue(existingTaxableIncome, bands);
+  const taxWith = calculateTaxDue(existingTaxableIncome + additionalIncome, bands);
+  
+  // The difference is the incremental tax
+  return Math.round((taxWith - taxWithout) * 100) / 100;
 }
 
 /**
@@ -488,13 +532,38 @@ export function calculateTax(
   // Step 6: Apply Adjustments (additional tax owed)
   breakdown.steps.push('=== STEP 6: Additional Tax Owed ===');
   
-  const totalAdjustments = adjustments.reduce((sum, a) => sum + a.amount, 0);
+  // Separate adjustments into income-type (needs tax calculation) vs direct tax
+  let totalAdjustmentTax = 0;
+  let totalAdditionalTaxableIncome = 0;
+  let currentTaxableIncome = taxableIncomeAfterDeductions; // Track position for marginal rate
   
   if (adjustments.length > 0) {
     for (const adjustment of adjustments) {
-      breakdown.steps.push(`${adjustment.description}: +£${adjustment.amount.toFixed(2)}`);
+      if (isAdjustmentTaxableIncome(adjustment.type)) {
+        // This is taxable income - calculate the marginal tax on it
+        const incrementalTax = calculateIncrementalTax(
+          currentTaxableIncome,
+          adjustment.amount,
+          taxBands
+        );
+        totalAdjustmentTax += incrementalTax;
+        totalAdditionalTaxableIncome += adjustment.amount;
+        
+        const marginalRate = calculateMarginalRate(currentTaxableIncome, taxBands);
+        breakdown.steps.push(
+          `${adjustment.description}: £${adjustment.amount.toFixed(2)} taxable income ` +
+          `→ £${incrementalTax.toFixed(2)} tax (at ~${(marginalRate * 100).toFixed(0)}% marginal rate)`
+        );
+        
+        // Update position for next adjustment (they stack)
+        currentTaxableIncome += adjustment.amount;
+      } else {
+        // This is direct tax (e.g., underpayment from previous year)
+        totalAdjustmentTax += adjustment.amount;
+        breakdown.steps.push(`${adjustment.description}: +£${adjustment.amount.toFixed(2)} (direct tax)`);
+      }
     }
-    breakdown.steps.push(`Total Additional Tax: £${totalAdjustments.toFixed(2)}`);
+    breakdown.steps.push(`Total Additional Tax: £${totalAdjustmentTax.toFixed(2)}`);
   } else {
     breakdown.steps.push('No additional tax owed');
   }
@@ -503,7 +572,7 @@ export function calculateTax(
   // Step 7: Final Summary
   breakdown.steps.push('=== STEP 7: Final Summary ===');
   
-  const finalTaxDue = taxDueOnIncome + totalAdjustments;
+  const finalTaxDue = taxDueOnIncome + totalAdjustmentTax;
   const taxPaid = sourceDetails.reduce((sum, d) => sum + d.taxPaid, 0);
   const netPosition = taxPaid - finalTaxDue;
   
@@ -512,8 +581,12 @@ export function calculateTax(
   breakdown.steps.push(`Taxable Income (before deductions): £${taxableIncomeBeforeDeductions.toFixed(2)}`);
   breakdown.steps.push(`Deductions: -£${totalDeductions.toFixed(2)}`);
   breakdown.steps.push(`Taxable Income (after deductions): £${taxableIncomeAfterDeductions.toFixed(2)}`);
+  if (totalAdditionalTaxableIncome > 0) {
+    breakdown.steps.push(`Additional Taxable Income: +£${totalAdditionalTaxableIncome.toFixed(2)}`);
+    breakdown.steps.push(`Final Taxable Income: £${currentTaxableIncome.toFixed(2)}`);
+  }
   breakdown.steps.push(`Tax Due on Income: £${taxDueOnIncome.toFixed(2)}`);
-  breakdown.steps.push(`Additional Tax Owed: +£${totalAdjustments.toFixed(2)}`);
+  breakdown.steps.push(`Additional Tax Owed: +£${totalAdjustmentTax.toFixed(2)}`);
   breakdown.steps.push(`Final Tax Due: £${finalTaxDue.toFixed(2)}`);
   breakdown.steps.push(`Total Tax Paid: £${taxPaid.toFixed(2)}`);
   breakdown.steps.push(`Net Position: £${netPosition.toFixed(2)} ${netPosition > 0 ? '(Refund)' : netPosition < 0 ? '(Owed)' : '(Balanced)'}`);
@@ -529,16 +602,16 @@ export function calculateTax(
     personalAllowance: safeRound(personalAllowance),
     totalDeductions: safeRound(totalDeductions),
     taxableIncomeBeforeDeductions: safeRound(taxableIncomeBeforeDeductions),
-    taxableIncomeAfterDeductions: safeRound(taxableIncomeAfterDeductions),
+    taxableIncomeAfterDeductions: safeRound(currentTaxableIncome), // Include additional taxable income
     taxDueOnIncome: safeRound(taxDueOnIncome),
-    totalAdjustments: safeRound(totalAdjustments),
+    totalAdjustments: safeRound(totalAdjustmentTax),
     finalTaxDue: safeRound(finalTaxDue),
     taxPaid: safeRound(taxPaid),
     netPosition: safeRound(netPosition),
     breakdown,
     sourceDetails,
     // Legacy fields for backwards compatibility
-    taxableIncome: safeRound(taxableIncomeAfterDeductions),
+    taxableIncome: safeRound(currentTaxableIncome),
     taxDue: safeRound(finalTaxDue)
   };
 }
