@@ -127,7 +127,11 @@ export function calculateProjectedIncome(
   includeCurrentMonth: boolean,
   today: Date = new Date()
 ): { projected: number; daysWorked: number; daysInYear: number } {
-  const start = new Date(startDate);
+  const rawStart = new Date(startDate);
+  
+  // Clamp start date to tax year start if it's earlier
+  // (we only calculate income within the current tax year)
+  const start = rawStart < TAX_YEAR_START ? new Date(TAX_YEAR_START) : rawStart;
   
   // Determine the "as of" date for calculations
   let asOfDate = includeCurrentMonth
