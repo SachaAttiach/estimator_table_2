@@ -511,7 +511,7 @@ function App() {
                           (() => {
                             const options = getValidMonthsPaidOptions(source.startDate);
                             // Default to the higher option if not set
-                            const currentValue = source.monthsPaid ?? (options.length > 0 ? options[options.length - 1].value : undefined);
+                            const currentValue = source.monthsPaid ?? (options.length > 0 ? options[0].value : undefined);
                             return (
                               <select
                                 value={currentValue ?? ''}
