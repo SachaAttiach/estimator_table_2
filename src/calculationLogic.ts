@@ -540,7 +540,7 @@ export interface PAYEProjectionResult {
  * Calculate projected annual income for regular income sources
  * Uses PAYE periods (6th-5th) instead of calendar months
  * 
- * @param monthsPaid - Number of PAYE periods of pay received (optional, auto-calculated if not provided)
+ * @param monthsPaid - Number of months of pay received (optional, auto-calculated if not provided)
  */
 export function calculateProjectedIncome(
   incomeToDate: number,
@@ -554,43 +554,46 @@ export function calculateProjectedIncome(
   // Clamp start date to tax year start if earlier
   const start = rawStart < TAX_YEAR_START ? new Date(TAX_YEAR_START) : rawStart;
   
-  // Get the "as of" date based on months paid selection
-  let asOfDate: Date;
-  if (monthsPaid !== undefined && monthsPaid > 0) {
-    asOfDate = getAsOfDateForMonthsPaid(monthsPaid, startDate, today);
-  } else {
-    // Default: use today's date (include current period)
-    asOfDate = new Date(today);
-  }
+  // Get start period info
+  const startPeriod = getPAYEPeriod(start);
   
-  // If start date is after the calculated asOfDate, use today instead
-  if (asOfDate < start) {
-    asOfDate = new Date(today);
-    
-    // If today is also before or equal to start date, income hasn't started yet
-    if (asOfDate <= start) {
-      const totalPeriodsResult = calculateTotalPeriods(start, new Date(endDate));
-      return {
-        projected: incomeToDate,
-        periodsWorked: 0.1, // Minimal value to avoid division by zero
-        totalPeriods: totalPeriodsResult.totalPeriods,
-        monthlyRate: incomeToDate,
-        firstPeriodFraction: totalPeriodsResult.firstPeriodFraction,
-        startPeriodNumber: getPAYEPeriod(start).periodNumber,
-        daysWorked: 1,
-        daysInYear: Math.round(totalPeriodsResult.totalPeriods * 30)
-      };
-    }
-  }
-  
-  // Calculate equivalent PAYE periods worked
-  const periodsWorkedResult = calculateEquivalentPeriods(start, asOfDate);
-  const periodsWorked = Math.max(0.1, periodsWorkedResult.equivalentPeriods); // Avoid division by zero
-  
-  // Calculate total PAYE periods in employment period
+  // Calculate total periods in employment period (for projection)
   const parsedEndDate = typeof endDate === 'string' ? parseDate(endDate) : endDate;
   const totalPeriodsResult = calculateTotalPeriods(start, parsedEndDate);
   const totalPeriods = totalPeriodsResult.totalPeriods;
+  
+  let periodsWorked: number;
+  let firstPeriodFraction: number;
+  
+  // If monthsPaid is explicitly provided, use it directly
+  if (monthsPaid !== undefined && monthsPaid > 0) {
+    // User has told us exactly how many months of pay they've received
+    // Use this directly as periods worked
+    periodsWorked = monthsPaid;
+    firstPeriodFraction = 1.0; // Assume full periods when user specifies
+  } else {
+    // Auto-calculate based on today's date
+    const asOfDate = new Date(today);
+    
+    // If today is before or equal to start date, income hasn't started yet
+    if (asOfDate <= start) {
+      return {
+        projected: incomeToDate,
+        periodsWorked: 0.1,
+        totalPeriods: totalPeriods,
+        monthlyRate: incomeToDate,
+        firstPeriodFraction: totalPeriodsResult.firstPeriodFraction,
+        startPeriodNumber: startPeriod.periodNumber,
+        daysWorked: 1,
+        daysInYear: Math.round(totalPeriods * 30)
+      };
+    }
+    
+    // Calculate equivalent PAYE periods worked
+    const periodsWorkedResult = calculateEquivalentPeriods(start, asOfDate);
+    periodsWorked = Math.max(0.1, periodsWorkedResult.equivalentPeriods);
+    firstPeriodFraction = periodsWorkedResult.firstPeriodFraction;
+  }
   
   // Calculate monthly rate and project
   const monthlyRate = incomeToDate / periodsWorked;
@@ -609,8 +612,8 @@ export function calculateProjectedIncome(
     periodsWorked: Math.round(periodsWorked * 1000) / 1000,
     totalPeriods: Math.round(totalPeriods * 1000) / 1000,
     monthlyRate: Math.round(monthlyRate * 100) / 100,
-    firstPeriodFraction: Math.round(periodsWorkedResult.firstPeriodFraction * 1000) / 1000,
-    startPeriodNumber: periodsWorkedResult.startPeriod.periodNumber,
+    firstPeriodFraction: Math.round(firstPeriodFraction * 1000) / 1000,
+    startPeriodNumber: startPeriod.periodNumber,
     // Legacy fields (approximate conversion for backwards compatibility)
     daysWorked: Math.round(periodsWorked * 30),
     daysInYear: Math.round(totalPeriods * 30)
