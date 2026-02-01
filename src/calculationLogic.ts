@@ -4,8 +4,9 @@
  */
 
 // Constants for 2025/26 tax year
-export const TAX_YEAR_START = new Date('2025-04-06');
-export const TAX_YEAR_END = new Date('2026-04-05');
+// Use explicit year, month, day to avoid timezone parsing issues
+export const TAX_YEAR_START = new Date(2025, 3, 6);  // April 6, 2025 (month is 0-indexed)
+export const TAX_YEAR_END = new Date(2026, 3, 5);    // April 5, 2026
 export const PERSONAL_ALLOWANCE = 12570;
 export const TAPER_THRESHOLD = 100000;
 export const TAPER_LIMIT = 125140;
@@ -123,6 +124,51 @@ export interface SourceBreakdown {
 export function daysBetween(start: Date, end: Date): number {
   const msPerDay = 24 * 60 * 60 * 1000;
   return Math.round((end.getTime() - start.getTime()) / msPerDay) + 1;
+}
+
+/**
+ * Parse a date string safely, handling both ISO format (YYYY-MM-DD) and UK format (DD/MM/YYYY)
+ */
+export function parseDate(dateStr: string | Date): Date {
+  if (dateStr instanceof Date) {
+    return new Date(dateStr);
+  }
+  
+  // If it contains a 'T', it's ISO format - parse directly
+  if (dateStr.includes('T')) {
+    return new Date(dateStr);
+  }
+  
+  // Check if it's in DD/MM/YYYY or similar format
+  const parts = dateStr.split(/[-/]/);
+  if (parts.length === 3) {
+    const first = parseInt(parts[0], 10);
+    const second = parseInt(parts[1], 10);
+    const third = parseInt(parts[2], 10);
+    
+    // If first part is 4 digits, assume YYYY-MM-DD
+    if (parts[0].length === 4) {
+      return new Date(first, second - 1, third);
+    }
+    
+    // If third part is 4 digits, assume DD/MM/YYYY or MM/DD/YYYY
+    if (parts[2].length === 4) {
+      // If first > 12, it must be DD/MM/YYYY
+      if (first > 12) {
+        return new Date(third, second - 1, first);
+      }
+      // If second > 12, it must be MM/DD/YYYY
+      if (second > 12) {
+        return new Date(third, first - 1, second);
+      }
+      // Ambiguous - assume ISO-like (YYYY-MM-DD) or DD/MM/YYYY based on context
+      // For UK tax system, assume DD/MM/YYYY
+      return new Date(third, second - 1, first);
+    }
+  }
+  
+  // Fallback to native parsing
+  return new Date(dateStr);
 }
 
 // ============================================================================
@@ -243,6 +289,9 @@ export function getCurrentPAYEPeriod(today: Date = new Date()): PAYEPeriod {
 /**
  * Calculate equivalent PAYE periods worked, accounting for partial first period
  * Returns the number of periods as a decimal (e.g., 5.387 for 5 full + partial)
+ * 
+ * The key insight: we count whole periods from startPeriod to asOfPeriod (inclusive)
+ * If started mid-period, the first period is fractional
  */
 export function calculateEquivalentPeriods(
   startDate: Date,
@@ -255,29 +304,40 @@ export function calculateEquivalentPeriods(
   // Get the PAYE period the start date falls into
   const startPeriod = getPAYEPeriod(effectiveStart, taxYearStart);
   
-  // Calculate what fraction of the first period was worked
-  // Days from start date to end of that period
-  const daysWorkedInFirstPeriod = daysBetween(effectiveStart, startPeriod.endDate);
-  const firstPeriodFraction = daysWorkedInFirstPeriod / startPeriod.daysInPeriod;
-  
   // Get the PAYE period the as-of date falls into
   const asOfPeriod = getPAYEPeriod(asOfDate, taxYearStart);
   
-  // Count full periods between start period and as-of period
-  // If start and as-of are in the same period, fullPeriodsAfter = 0
+  // Calculate what fraction of the first period was worked
+  // If started on the 6th (period start), this is 1.0
+  // If started later, it's a fraction
+  const startDay = effectiveStart.getDate();
+  let firstPeriodFraction: number;
+  
+  if (startDay === 6) {
+    // Started on period start date - count as full period
+    firstPeriodFraction = 1.0;
+  } else if (startDay > 6) {
+    // Started mid-period - calculate fraction
+    const daysWorkedInFirstPeriod = daysBetween(effectiveStart, startPeriod.endDate);
+    firstPeriodFraction = daysWorkedInFirstPeriod / startPeriod.daysInPeriod;
+  } else {
+    // startDay < 6 means we're in previous period's territory - shouldn't happen after getPAYEPeriod
+    // but handle it as full period to be safe
+    firstPeriodFraction = 1.0;
+  }
+  
+  // Count WHOLE periods from (startPeriod + 1) to asOfPeriod (inclusive)
+  // This is simply the difference in period numbers
   let fullPeriodsAfter = 0;
   if (asOfPeriod.periodNumber > startPeriod.periodNumber) {
-    fullPeriodsAfter = asOfPeriod.periodNumber - startPeriod.periodNumber - 1;
-    
-    // Include the as-of period if we're past the 5th (period is complete)
-    // or if we're including the current period
-    // For now, we include it as a full period (the include/exclude logic is handled by asOfDate)
-    fullPeriodsAfter += 1;
+    // Number of complete periods after the start period, up to and including asOf period
+    fullPeriodsAfter = asOfPeriod.periodNumber - startPeriod.periodNumber;
   } else if (asOfPeriod.periodNumber === startPeriod.periodNumber) {
-    // Started and still in the same period - no full periods after
+    // Still in the same period we started - no full periods after
     fullPeriodsAfter = 0;
   }
   
+  // Total equivalent periods = first period fraction + full periods after
   const equivalentPeriods = firstPeriodFraction + fullPeriodsAfter;
   
   return { equivalentPeriods, firstPeriodFraction, fullPeriodsAfter, startPeriod };
@@ -365,7 +425,7 @@ export function calculateProjectedIncome(
   today: Date = new Date(),
   endDate: string | Date = TAX_YEAR_END
 ): PAYEProjectionResult {
-  const rawStart = new Date(startDate);
+  const rawStart = parseDate(startDate);
   
   // Clamp start date to tax year start if earlier
   const start = rawStart < TAX_YEAR_START ? new Date(TAX_YEAR_START) : rawStart;
@@ -398,7 +458,8 @@ export function calculateProjectedIncome(
   const periodsWorked = Math.max(0.1, periodsWorkedResult.equivalentPeriods); // Avoid division by zero
   
   // Calculate total PAYE periods in employment period
-  const totalPeriodsResult = calculateTotalPeriods(start, new Date(endDate));
+  const parsedEndDate = typeof endDate === 'string' ? parseDate(endDate) : endDate;
+  const totalPeriodsResult = calculateTotalPeriods(start, parsedEndDate);
   const totalPeriods = totalPeriodsResult.totalPeriods;
   
   // Calculate monthly rate and project
