@@ -417,8 +417,33 @@ export interface MonthsPaidOption {
 }
 
 /**
+ * Get the period number for a calendar month
+ * People get paid at end of each calendar month, so Feb 1st means Feb pay is the question
+ * Period 1 = April, Period 2 = May, ..., Period 10 = January, Period 11 = February, Period 12 = March
+ */
+function getCalendarMonthPeriod(date: Date, taxYearStart: Date = TAX_YEAR_START): number {
+  const month = date.getMonth(); // 0-indexed (0 = Jan, 1 = Feb, etc.)
+  const year = date.getFullYear();
+  const taxYearStartMonth = taxYearStart.getMonth(); // April = 3
+  const taxYearStartYear = taxYearStart.getFullYear();
+  
+  // Calculate period number based on calendar month
+  // April (month 3) = Period 1, May (month 4) = Period 2, etc.
+  let periodNumber: number;
+  if (year === taxYearStartYear) {
+    periodNumber = month - taxYearStartMonth + 1;
+  } else {
+    // We're in the next calendar year (Jan-Mar)
+    periodNumber = month + 12 - taxYearStartMonth + 1;
+  }
+  
+  return Math.max(1, Math.min(12, periodNumber));
+}
+
+/**
  * Calculate valid "months paid to date" options based on start date and today's date
- * Returns two options: N-1 months (haven't received current period pay) and N months (have received it)
+ * Returns two options: N-1 months (haven't received current month's pay) and N months (have received it)
+ * Uses calendar months because people get paid at end of each month, not on PAYE period boundaries
  */
 export function getValidMonthsPaidOptions(
   startDate: string,
@@ -433,30 +458,31 @@ export function getValidMonthsPaidOptions(
   // Get the PAYE period the start date falls into
   const startPeriod = getPAYEPeriod(effectiveStart, taxYearStart);
   
-  // Get the current PAYE period
-  const currentPeriod = getPAYEPeriod(today, taxYearStart);
+  // Get the current calendar month's period number (not PAYE period)
+  // On Feb 1, this gives Period 11 (Feb), not Period 10 (Jan 6 - Feb 5)
+  const currentCalendarPeriod = getCalendarMonthPeriod(today, taxYearStart);
   
   // Calculate how many complete periods from start to current (inclusive)
   // This is the maximum possible months paid
-  const maxMonths = currentPeriod.periodNumber - startPeriod.periodNumber + 1;
+  const maxMonths = currentCalendarPeriod - startPeriod.periodNumber + 1;
   
   // The two valid options:
-  // - maxMonths - 1: Haven't received current period's pay yet
-  // - maxMonths: Have received current period's pay
+  // - maxMonths - 1: Haven't received current month's pay yet
+  // - maxMonths: Have received current month's pay
   const options: MonthsPaidOption[] = [];
   
   const startMonthName = getMonthNameForPeriod(startPeriod.periodNumber);
   
   if (maxMonths > 1) {
-    const prevPeriodMonthName = getMonthNameForPeriod(currentPeriod.periodNumber - 1);
+    const prevMonthName = getMonthNameForPeriod(currentCalendarPeriod - 1);
     options.push({
       value: maxMonths - 1,
-      label: `${maxMonths - 1} month${maxMonths - 1 !== 1 ? 's' : ''} (through ${prevPeriodMonthName})`,
-      periodRange: `${startMonthName}-${prevPeriodMonthName}`
+      label: `${maxMonths - 1} month${maxMonths - 1 !== 1 ? 's' : ''} (through ${prevMonthName})`,
+      periodRange: `${startMonthName}-${prevMonthName}`
     });
   }
   
-  const currentMonthName = getMonthNameForPeriod(currentPeriod.periodNumber);
+  const currentMonthName = getMonthNameForPeriod(currentCalendarPeriod);
   options.push({
     value: maxMonths,
     label: `${maxMonths} month${maxMonths !== 1 ? 's' : ''} (through ${currentMonthName})`,
