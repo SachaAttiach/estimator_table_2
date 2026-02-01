@@ -41,7 +41,7 @@ export interface IncomeSource {
   isRegular: boolean;
   startDate: string;
   endDate: string;
-  includeCurrentMonth: boolean;
+  monthsPaid?: number; // number of PAYE periods paid (replaces includeCurrentMonth)
   projectedIncome?: number; // user can override
   taxPaid?: number; // actual tax paid (for one-offs or user override)
 }
@@ -400,6 +400,102 @@ export function getAsOfDateForPAYE(
 }
 
 /**
+ * Get the month name for a PAYE period number
+ */
+function getMonthNameForPeriod(periodNumber: number): string {
+  const monthNames = ['Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
+  return monthNames[periodNumber - 1] || '';
+}
+
+/**
+ * Valid months paid option for dropdown
+ */
+export interface MonthsPaidOption {
+  value: number;
+  label: string;
+  periodRange: string; // e.g., "Apr-Dec" or "Apr-Jan"
+}
+
+/**
+ * Calculate valid "months paid to date" options based on start date and today's date
+ * Returns two options: N-1 months (haven't received current period pay) and N months (have received it)
+ */
+export function getValidMonthsPaidOptions(
+  startDate: string,
+  today: Date = new Date(),
+  taxYearStart: Date = TAX_YEAR_START
+): MonthsPaidOption[] {
+  const parsedStart = parseDate(startDate);
+  
+  // Clamp start date to tax year start if earlier
+  const effectiveStart = parsedStart < taxYearStart ? new Date(taxYearStart) : parsedStart;
+  
+  // Get the PAYE period the start date falls into
+  const startPeriod = getPAYEPeriod(effectiveStart, taxYearStart);
+  
+  // Get the current PAYE period
+  const currentPeriod = getPAYEPeriod(today, taxYearStart);
+  
+  // Calculate how many complete periods from start to current (inclusive)
+  // This is the maximum possible months paid
+  const maxMonths = currentPeriod.periodNumber - startPeriod.periodNumber + 1;
+  
+  // The two valid options:
+  // - maxMonths - 1: Haven't received current period's pay yet
+  // - maxMonths: Have received current period's pay
+  const options: MonthsPaidOption[] = [];
+  
+  const startMonthName = getMonthNameForPeriod(startPeriod.periodNumber);
+  
+  if (maxMonths > 1) {
+    const prevPeriodMonthName = getMonthNameForPeriod(currentPeriod.periodNumber - 1);
+    options.push({
+      value: maxMonths - 1,
+      label: `${maxMonths - 1} month${maxMonths - 1 !== 1 ? 's' : ''} (through ${prevPeriodMonthName})`,
+      periodRange: `${startMonthName}-${prevPeriodMonthName}`
+    });
+  }
+  
+  const currentMonthName = getMonthNameForPeriod(currentPeriod.periodNumber);
+  options.push({
+    value: maxMonths,
+    label: `${maxMonths} month${maxMonths !== 1 ? 's' : ''} (through ${currentMonthName})`,
+    periodRange: `${startMonthName}-${currentMonthName}`
+  });
+  
+  return options;
+}
+
+/**
+ * Get the "as of" date based on months paid selection
+ * Converts months paid count to an appropriate end date for the calculation
+ */
+export function getAsOfDateForMonthsPaid(
+  monthsPaid: number,
+  startDate: string,
+  today: Date = new Date(),
+  taxYearStart: Date = TAX_YEAR_START
+): Date {
+  const parsedStart = parseDate(startDate);
+  
+  // Clamp start date to tax year start if earlier
+  const effectiveStart = parsedStart < taxYearStart ? new Date(taxYearStart) : parsedStart;
+  
+  // Get the start period
+  const startPeriod = getPAYEPeriod(effectiveStart, taxYearStart);
+  
+  // Calculate which period number corresponds to the months paid
+  // If started in Period 5 and monthsPaid is 3, that means through Period 7
+  const targetPeriodNumber = startPeriod.periodNumber + monthsPaid - 1;
+  
+  // Get the end date of that period
+  const { endDate } = getPAYEPeriodDates(targetPeriodNumber, taxYearStart);
+  
+  // Return the end date of the target period, but not beyond today
+  return endDate < today ? endDate : today;
+}
+
+/**
  * Result of PAYE period-based income projection
  */
 export interface PAYEProjectionResult {
@@ -417,11 +513,13 @@ export interface PAYEProjectionResult {
 /**
  * Calculate projected annual income for regular income sources
  * Uses PAYE periods (6th-5th) instead of calendar months
+ * 
+ * @param monthsPaid - Number of PAYE periods of pay received (optional, auto-calculated if not provided)
  */
 export function calculateProjectedIncome(
   incomeToDate: number,
   startDate: string,
-  includeCurrentPeriod: boolean,
+  monthsPaid: number | undefined,
   today: Date = new Date(),
   endDate: string | Date = TAX_YEAR_END
 ): PAYEProjectionResult {
@@ -430,8 +528,14 @@ export function calculateProjectedIncome(
   // Clamp start date to tax year start if earlier
   const start = rawStart < TAX_YEAR_START ? new Date(TAX_YEAR_START) : rawStart;
   
-  // Get the "as of" date based on include/exclude current PAYE period
-  let asOfDate = getAsOfDateForPAYE(includeCurrentPeriod, today);
+  // Get the "as of" date based on months paid selection
+  let asOfDate: Date;
+  if (monthsPaid !== undefined && monthsPaid > 0) {
+    asOfDate = getAsOfDateForMonthsPaid(monthsPaid, startDate, today);
+  } else {
+    // Default: use today's date (include current period)
+    asOfDate = new Date(today);
+  }
   
   // If start date is after the calculated asOfDate, use today instead
   if (asOfDate < start) {
@@ -724,11 +828,10 @@ export function calculateTax(
         finalIncome = source.projectedIncome;
         calculation = `User override: £${finalIncome.toFixed(2)}`;
       } else {
-        const includeCurrentPeriod = source.includeCurrentMonth ?? true;
         const projection = calculateProjectedIncome(
           source.incomeToDate,
           source.startDate,
-          includeCurrentPeriod,
+          source.monthsPaid,
           today,
           source.endDate
         );
@@ -742,7 +845,7 @@ export function calculateTax(
         daysWorked = projection.daysWorked;
         daysInYear = projection.daysInYear;
         
-        const periodNote = includeCurrentPeriod ? 'including current PAYE period' : 'excluding current PAYE period';
+        const periodNote = source.monthsPaid ? `${source.monthsPaid} months paid` : 'auto-calculated';
         
         // Build calculation string with PAYE period info
         if (firstPeriodFraction !== undefined && firstPeriodFraction < 1) {
