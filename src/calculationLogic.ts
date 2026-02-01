@@ -105,6 +105,13 @@ export interface SourceBreakdown {
   incomeToDate: number;
   isRegular: boolean;
   projectedOrActual: number;
+  // PAYE period-based fields
+  periodsWorked?: number;        // Equivalent periods worked (e.g., 5.387)
+  totalPeriods?: number;         // Total periods in employment period
+  monthlyRate?: number;          // Calculated monthly rate
+  firstPeriodFraction?: number;  // Fraction of first period worked
+  startPeriodNumber?: number;    // Which PAYE period employment started in
+  // Legacy fields for backwards compatibility
   daysWorked?: number;
   daysInYear?: number;
   calculation: string;
@@ -118,78 +125,305 @@ export function daysBetween(start: Date, end: Date): number {
   return Math.round((end.getTime() - start.getTime()) / msPerDay) + 1;
 }
 
+// ============================================================================
+// PAYE PERIOD HELPERS
+// PAYE periods run from 6th of one month to 5th of the next month
+// Period 1: April 6 - May 5, Period 2: May 6 - June 5, ..., Period 12: March 6 - April 5
+// ============================================================================
+
+export interface PAYEPeriod {
+  periodNumber: number;  // 1-12
+  startDate: Date;
+  endDate: Date;
+  daysInPeriod: number;
+}
+
+/**
+ * Get the PAYE period information for a given date
+ * PAYE periods run from 6th to 5th of the following month
+ */
+export function getPAYEPeriod(date: Date, taxYearStart: Date = TAX_YEAR_START): PAYEPeriod {
+  const year = date.getFullYear();
+  const month = date.getMonth(); // 0-indexed
+  const day = date.getDate();
+  
+  // Determine which PAYE period this date falls into
+  // If day >= 6, we're in the period that starts this month
+  // If day <= 5, we're in the period that started last month
+  
+  let periodStartMonth: number;
+  let periodStartYear: number;
+  
+  if (day >= 6) {
+    periodStartMonth = month;
+    periodStartYear = year;
+  } else {
+    // Day is 1-5, so we're in the period that started on the 6th of the previous month
+    if (month === 0) {
+      periodStartMonth = 11; // December
+      periodStartYear = year - 1;
+    } else {
+      periodStartMonth = month - 1;
+      periodStartYear = year;
+    }
+  }
+  
+  // Calculate period number (1-12)
+  // Period 1 starts April 6, Period 2 starts May 6, etc.
+  const taxYearStartMonth = taxYearStart.getMonth(); // April = 3
+  const taxYearStartYear = taxYearStart.getFullYear();
+  
+  let periodNumber: number;
+  if (periodStartYear === taxYearStartYear) {
+    periodNumber = periodStartMonth - taxYearStartMonth + 1;
+  } else {
+    // We're in the next calendar year (Jan-Mar)
+    periodNumber = periodStartMonth + 12 - taxYearStartMonth + 1;
+  }
+  
+  // Clamp period number to 1-12
+  periodNumber = Math.max(1, Math.min(12, periodNumber));
+  
+  // Calculate start and end dates for this period
+  const startDate = new Date(periodStartYear, periodStartMonth, 6);
+  
+  // End date is the 5th of the following month
+  let endMonth = periodStartMonth + 1;
+  let endYear = periodStartYear;
+  if (endMonth > 11) {
+    endMonth = 0;
+    endYear++;
+  }
+  const endDate = new Date(endYear, endMonth, 5);
+  
+  const daysInPeriod = daysBetween(startDate, endDate);
+  
+  return { periodNumber, startDate, endDate, daysInPeriod };
+}
+
+/**
+ * Get the start and end dates for a specific PAYE period number (1-12)
+ */
+export function getPAYEPeriodDates(periodNumber: number, taxYearStart: Date = TAX_YEAR_START): { startDate: Date; endDate: Date; daysInPeriod: number } {
+  const taxYearStartMonth = taxYearStart.getMonth(); // April = 3
+  const taxYearStartYear = taxYearStart.getFullYear();
+  
+  // Calculate which month this period starts in
+  let startMonth = taxYearStartMonth + periodNumber - 1;
+  let startYear = taxYearStartYear;
+  
+  if (startMonth > 11) {
+    startMonth -= 12;
+    startYear++;
+  }
+  
+  const startDate = new Date(startYear, startMonth, 6);
+  
+  // End date is 5th of the following month
+  let endMonth = startMonth + 1;
+  let endYear = startYear;
+  if (endMonth > 11) {
+    endMonth = 0;
+    endYear++;
+  }
+  const endDate = new Date(endYear, endMonth, 5);
+  
+  const daysInPeriod = daysBetween(startDate, endDate);
+  
+  return { startDate, endDate, daysInPeriod };
+}
+
+/**
+ * Get the current PAYE period based on today's date
+ */
+export function getCurrentPAYEPeriod(today: Date = new Date()): PAYEPeriod {
+  return getPAYEPeriod(today);
+}
+
+/**
+ * Calculate equivalent PAYE periods worked, accounting for partial first period
+ * Returns the number of periods as a decimal (e.g., 5.387 for 5 full + partial)
+ */
+export function calculateEquivalentPeriods(
+  startDate: Date,
+  asOfDate: Date,
+  taxYearStart: Date = TAX_YEAR_START
+): { equivalentPeriods: number; firstPeriodFraction: number; fullPeriodsAfter: number; startPeriod: PAYEPeriod } {
+  // Clamp start date to tax year start if earlier
+  const effectiveStart = startDate < taxYearStart ? new Date(taxYearStart) : new Date(startDate);
+  
+  // Get the PAYE period the start date falls into
+  const startPeriod = getPAYEPeriod(effectiveStart, taxYearStart);
+  
+  // Calculate what fraction of the first period was worked
+  // Days from start date to end of that period
+  const daysWorkedInFirstPeriod = daysBetween(effectiveStart, startPeriod.endDate);
+  const firstPeriodFraction = daysWorkedInFirstPeriod / startPeriod.daysInPeriod;
+  
+  // Get the PAYE period the as-of date falls into
+  const asOfPeriod = getPAYEPeriod(asOfDate, taxYearStart);
+  
+  // Count full periods between start period and as-of period
+  // If start and as-of are in the same period, fullPeriodsAfter = 0
+  let fullPeriodsAfter = 0;
+  if (asOfPeriod.periodNumber > startPeriod.periodNumber) {
+    fullPeriodsAfter = asOfPeriod.periodNumber - startPeriod.periodNumber - 1;
+    
+    // Include the as-of period if we're past the 5th (period is complete)
+    // or if we're including the current period
+    // For now, we include it as a full period (the include/exclude logic is handled by asOfDate)
+    fullPeriodsAfter += 1;
+  } else if (asOfPeriod.periodNumber === startPeriod.periodNumber) {
+    // Started and still in the same period - no full periods after
+    fullPeriodsAfter = 0;
+  }
+  
+  const equivalentPeriods = firstPeriodFraction + fullPeriodsAfter;
+  
+  return { equivalentPeriods, firstPeriodFraction, fullPeriodsAfter, startPeriod };
+}
+
+/**
+ * Calculate total PAYE periods in employment period (start to end of tax year)
+ */
+export function calculateTotalPeriods(
+  startDate: Date,
+  endDate: Date = TAX_YEAR_END,
+  taxYearStart: Date = TAX_YEAR_START
+): { totalPeriods: number; firstPeriodFraction: number; fullPeriodsAfter: number } {
+  // Clamp start date to tax year start if earlier
+  const effectiveStart = startDate < taxYearStart ? new Date(taxYearStart) : new Date(startDate);
+  
+  // Clamp end date to tax year end if later
+  const effectiveEnd = endDate > TAX_YEAR_END ? new Date(TAX_YEAR_END) : new Date(endDate);
+  
+  // Get the PAYE period the start date falls into
+  const startPeriod = getPAYEPeriod(effectiveStart, taxYearStart);
+  
+  // Calculate what fraction of the first period will be worked
+  const daysWorkedInFirstPeriod = daysBetween(effectiveStart, startPeriod.endDate);
+  const firstPeriodFraction = daysWorkedInFirstPeriod / startPeriod.daysInPeriod;
+  
+  // Get the final period (Period 12 ends April 5)
+  const endPeriod = getPAYEPeriod(effectiveEnd, taxYearStart);
+  
+  // Count full periods from (start period + 1) to end period
+  const fullPeriodsAfter = endPeriod.periodNumber - startPeriod.periodNumber;
+  
+  const totalPeriods = firstPeriodFraction + fullPeriodsAfter;
+  
+  return { totalPeriods, firstPeriodFraction, fullPeriodsAfter };
+}
+
+/**
+ * Get the "as of" date based on include/exclude current PAYE period toggle
+ * If exclude: returns the last day of the previous PAYE period (5th of current month)
+ * If include: returns today
+ */
+export function getAsOfDateForPAYE(
+  includeCurrentPeriod: boolean,
+  today: Date = new Date()
+): Date {
+  if (includeCurrentPeriod) {
+    return new Date(today);
+  }
+  
+  // Exclude current period - return the end of the previous period
+  const currentPeriod = getPAYEPeriod(today);
+  
+  // The previous period ended on the day before this period started
+  // Or we can calculate: if we're in period N, previous period ended on 5th of the month period N started
+  const prevPeriodEnd = new Date(currentPeriod.startDate);
+  prevPeriodEnd.setDate(prevPeriodEnd.getDate() - 1); // Day before period start = 5th
+  
+  return prevPeriodEnd;
+}
+
+/**
+ * Result of PAYE period-based income projection
+ */
+export interface PAYEProjectionResult {
+  projected: number;
+  periodsWorked: number;        // Equivalent periods worked (e.g., 5.387)
+  totalPeriods: number;         // Total periods in employment period (e.g., 8.387)
+  monthlyRate: number;          // Calculated monthly rate
+  firstPeriodFraction: number;  // Fraction of first period worked (e.g., 0.387)
+  startPeriodNumber: number;    // Which PAYE period employment started in
+  // Legacy fields for backwards compatibility
+  daysWorked: number;
+  daysInYear: number;
+}
+
 /**
  * Calculate projected annual income for regular income sources
+ * Uses PAYE periods (6th-5th) instead of calendar months
  */
 export function calculateProjectedIncome(
   incomeToDate: number,
   startDate: string,
-  includeCurrentMonth: boolean,
-  today: Date = new Date()
-): { projected: number; daysWorked: number; daysInYear: number } {
-  const start = new Date(startDate);
+  includeCurrentPeriod: boolean,
+  today: Date = new Date(),
+  endDate: string | Date = TAX_YEAR_END
+): PAYEProjectionResult {
+  const rawStart = new Date(startDate);
   
-  // Determine the "as of" date for calculations
-  let asOfDate = includeCurrentMonth
-    ? new Date(today)
-    : new Date(today.getFullYear(), today.getMonth(), 0); // last day of previous month
-
-  // If start date is after the calculated asOfDate (e.g., started mid-month with "exclude current month"),
-  // we should use today instead to have meaningful data
+  // Clamp start date to tax year start if earlier
+  const start = rawStart < TAX_YEAR_START ? new Date(TAX_YEAR_START) : rawStart;
+  
+  // Get the "as of" date based on include/exclude current PAYE period
+  let asOfDate = getAsOfDateForPAYE(includeCurrentPeriod, today);
+  
+  // If start date is after the calculated asOfDate, use today instead
   if (asOfDate < start) {
-    // Override to use today - we need at least some days worked for a reasonable projection
     asOfDate = new Date(today);
     
-    // If today is also before or equal to start date, the income hasn't actually started yet
+    // If today is also before or equal to start date, income hasn't started yet
     if (asOfDate <= start) {
-      // Not enough data for projection - return minimal values
-      const endDate = new Date(TAX_YEAR_END);
-      const daysInYear = Math.max(1, daysBetween(start, endDate));
-      return { 
-        projected: incomeToDate, // Just use what we have
-        daysWorked: 1, 
-        daysInYear 
+      const totalPeriodsResult = calculateTotalPeriods(start, new Date(endDate));
+      return {
+        projected: incomeToDate,
+        periodsWorked: 0.1, // Minimal value to avoid division by zero
+        totalPeriods: totalPeriodsResult.totalPeriods,
+        monthlyRate: incomeToDate,
+        firstPeriodFraction: totalPeriodsResult.firstPeriodFraction,
+        startPeriodNumber: getPAYEPeriod(start).periodNumber,
+        daysWorked: 1,
+        daysInYear: Math.round(totalPeriodsResult.totalPeriods * 30)
       };
     }
   }
   
-  // Calculate days worked from start date to as-of date
-  const daysWorked = Math.max(1, daysBetween(start, asOfDate));
+  // Calculate equivalent PAYE periods worked
+  const periodsWorkedResult = calculateEquivalentPeriods(start, asOfDate);
+  const periodsWorked = Math.max(0.1, periodsWorkedResult.equivalentPeriods); // Avoid division by zero
   
-  // Validation: if daysWorked is very small (< 7 days), this might lead to unrealistic projections
-  // In such cases, we should be more conservative
-  const MIN_DAYS_FOR_PROJECTION = 7;
+  // Calculate total PAYE periods in employment period
+  const totalPeriodsResult = calculateTotalPeriods(start, new Date(endDate));
+  const totalPeriods = totalPeriodsResult.totalPeriods;
   
-  // Calculate total days in employment period (start to end of tax year)
-  const endDate = new Date(TAX_YEAR_END);
-  const daysInYear = daysBetween(start, endDate);
+  // Calculate monthly rate and project
+  const monthlyRate = incomeToDate / periodsWorked;
+  let projected = monthlyRate * totalPeriods;
   
-  // Project annual income
-  const dailyRate = incomeToDate / daysWorked;
-  let projected = dailyRate * daysInYear;
-  
-  // If we have very few days of data, cap the projection to be more conservative
-  // This prevents extreme annualization from a few days of data
-  if (daysWorked < MIN_DAYS_FOR_PROJECTION && incomeToDate > 0) {
-    // Use a more conservative approach: assume the income rate, but don't over-extrapolate
-    // Cap at a reasonable multiple (e.g., 52x weekly income if we only have 1 week of data)
-    const weeksWorked = daysWorked / 7;
-    const weeklyRate = incomeToDate / weeksWorked;
-    const weeksRemaining = daysInYear / 7;
-    const conservativeProjection = weeklyRate * weeksRemaining;
-    
-    // Use the lower of the two projections to be conservative
-    projected = Math.min(projected, conservativeProjection);
-  }
-  
+  // Round to 2 decimal places
   projected = Math.round(projected * 100) / 100;
   
   // Validation: ensure we don't return NaN or Infinity
   if (!isFinite(projected) || isNaN(projected)) {
-    projected = incomeToDate; // Fallback to actual income
+    projected = incomeToDate;
   }
   
-  return { projected, daysWorked, daysInYear };
+  return {
+    projected,
+    periodsWorked: Math.round(periodsWorked * 1000) / 1000,
+    totalPeriods: Math.round(totalPeriods * 1000) / 1000,
+    monthlyRate: Math.round(monthlyRate * 100) / 100,
+    firstPeriodFraction: Math.round(periodsWorkedResult.firstPeriodFraction * 1000) / 1000,
+    startPeriodNumber: periodsWorkedResult.startPeriod.periodNumber,
+    // Legacy fields (approximate conversion for backwards compatibility)
+    daysWorked: Math.round(periodsWorked * 30),
+    daysInYear: Math.round(totalPeriods * 30)
+  };
 }
 
 /**
@@ -414,6 +648,12 @@ export function calculateTax(
   for (const source of sources) {
     let finalIncome: number;
     let calculation: string;
+    let periodsWorked: number | undefined;
+    let totalPeriods: number | undefined;
+    let monthlyRate: number | undefined;
+    let firstPeriodFraction: number | undefined;
+    let startPeriodNumber: number | undefined;
+    // Legacy fields
     let daysWorked: number | undefined;
     let daysInYear: number | undefined;
     
@@ -423,19 +663,32 @@ export function calculateTax(
         finalIncome = source.projectedIncome;
         calculation = `User override: £${finalIncome.toFixed(2)}`;
       } else {
-        const includeMonth = source.includeCurrentMonth ?? true;
+        const includeCurrentPeriod = source.includeCurrentMonth ?? true;
         const projection = calculateProjectedIncome(
           source.incomeToDate,
           source.startDate,
-          includeMonth,
-          today
+          includeCurrentPeriod,
+          today,
+          source.endDate
         );
         finalIncome = projection.projected;
+        periodsWorked = projection.periodsWorked;
+        totalPeriods = projection.totalPeriods;
+        monthlyRate = projection.monthlyRate;
+        firstPeriodFraction = projection.firstPeriodFraction;
+        startPeriodNumber = projection.startPeriodNumber;
+        // Legacy
         daysWorked = projection.daysWorked;
         daysInYear = projection.daysInYear;
         
-        const monthNote = includeMonth ? 'including current month' : 'excluding current month';
-        calculation = `£${source.incomeToDate.toFixed(2)} ÷ ${daysWorked} days worked × ${daysInYear} days in period = £${finalIncome.toFixed(2)} (${monthNote})`;
+        const periodNote = includeCurrentPeriod ? 'including current PAYE period' : 'excluding current PAYE period';
+        
+        // Build calculation string with PAYE period info
+        if (firstPeriodFraction !== undefined && firstPeriodFraction < 1) {
+          calculation = `£${source.incomeToDate.toFixed(2)} ÷ ${periodsWorked?.toFixed(3)} periods (${(firstPeriodFraction * 100).toFixed(1)}% of Period ${startPeriodNumber} + ${Math.floor(periodsWorked! - firstPeriodFraction)} full periods) × ${totalPeriods?.toFixed(3)} total periods = £${finalIncome.toFixed(2)} (${periodNote})`;
+        } else {
+          calculation = `£${source.incomeToDate.toFixed(2)} ÷ ${periodsWorked?.toFixed(3)} periods × ${totalPeriods?.toFixed(3)} total periods = £${finalIncome.toFixed(2)} (${periodNote})`;
+        }
       }
     } else {
       // One-off payment - use actual income
@@ -450,6 +703,11 @@ export function calculateTax(
       incomeToDate: source.incomeToDate,
       isRegular: source.isRegular,
       projectedOrActual: finalIncome,
+      periodsWorked,
+      totalPeriods,
+      monthlyRate,
+      firstPeriodFraction,
+      startPeriodNumber,
       daysWorked,
       daysInYear,
       calculation

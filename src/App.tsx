@@ -912,9 +912,12 @@ function App() {
                       <div className="breakdown-detail">
                         {source.calculation}
                       </div>
-                      {source.daysWorked && (
+                      {source.periodsWorked && (
                         <div className="breakdown-meta">
-                          Days worked: {source.daysWorked} | Days in period: {source.daysInYear}
+                          Periods worked: {source.periodsWorked?.toFixed(3)} | Total periods: {source.totalPeriods?.toFixed(3)} | Monthly rate: £{source.monthlyRate?.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {source.firstPeriodFraction !== undefined && source.firstPeriodFraction < 1 && (
+                            <> | First period (P{source.startPeriodNumber}): {(source.firstPeriodFraction * 100).toFixed(1)}%</>
+                          )}
                         </div>
                       )}
                     </div>
