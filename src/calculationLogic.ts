@@ -567,35 +567,42 @@ export function calculateProjectedIncome(
   let periodsWorked: number;
   let firstPeriodFraction: number;
   
-  // If monthsPaid is explicitly provided, use it directly
+  // Determine the asOfDate based on whether monthsPaid is provided
+  let asOfDate: Date;
+  
   if (monthsPaid !== undefined && monthsPaid > 0) {
-    // User has told us exactly how many months of pay they've received
-    // Use this directly as periods worked
-    periodsWorked = monthsPaid;
-    firstPeriodFraction = 1.0; // Assume full periods when user specifies
+    // User selected a specific number of months from dropdown
+    // Calculate the target period end date based on months paid
+    const targetPeriodNumber = startPeriod.periodNumber + monthsPaid - 1;
+    const { endDate: periodEndDate } = getPAYEPeriodDates(targetPeriodNumber);
+    
+    // Use the period end date as asOfDate
+    // DO NOT clamp to today - user is explicitly saying they've been paid through this period
+    asOfDate = periodEndDate;
   } else {
     // Auto-calculate based on today's date
-    const asOfDate = new Date(today);
-    
-    // If today is before or equal to start date, income hasn't started yet
-    if (asOfDate <= start) {
-      return {
-        projected: incomeToDate,
-        periodsWorked: 0.1,
-        totalPeriods: totalPeriods,
-        monthlyRate: incomeToDate,
-        firstPeriodFraction: totalPeriodsResult.firstPeriodFraction,
-        startPeriodNumber: startPeriod.periodNumber,
-        daysWorked: 1,
-        daysInYear: Math.round(totalPeriods * 30)
-      };
-    }
-    
-    // Calculate equivalent PAYE periods worked
-    const periodsWorkedResult = calculateEquivalentPeriods(start, asOfDate);
-    periodsWorked = Math.max(0.1, periodsWorkedResult.equivalentPeriods);
-    firstPeriodFraction = periodsWorkedResult.firstPeriodFraction;
+    asOfDate = new Date(today);
   }
+  
+  // If asOfDate is before or equal to start date, income hasn't started yet
+  if (asOfDate <= start) {
+    return {
+      projected: incomeToDate,
+      periodsWorked: 0.1,
+      totalPeriods: totalPeriods,
+      monthlyRate: incomeToDate,
+      firstPeriodFraction: totalPeriodsResult.firstPeriodFraction,
+      startPeriodNumber: startPeriod.periodNumber,
+      daysWorked: 1,
+      daysInYear: Math.round(totalPeriods * 30)
+    };
+  }
+  
+  // Calculate equivalent PAYE periods worked using precise PAYE fractions
+  // This is used for BOTH dropdown selections and auto-calculation
+  const periodsWorkedResult = calculateEquivalentPeriods(start, asOfDate);
+  periodsWorked = Math.max(0.1, periodsWorkedResult.equivalentPeriods);
+  firstPeriodFraction = periodsWorkedResult.firstPeriodFraction;
   
   // Calculate monthly rate and project
   const monthlyRate = incomeToDate / periodsWorked;
