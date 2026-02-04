@@ -8,7 +8,8 @@ import {
   CalculationResult,
   TAX_YEAR_START,
   TAX_YEAR_END,
-  isAdjustmentTaxableIncome
+  isAdjustmentTaxableIncome,
+  getValidMonthsPaidOptions
 } from './calculationLogic';
 
 // Preloaded scenarios
@@ -28,8 +29,7 @@ const SCENARIOS = {
         incomeToDate: 18106.06,
         isRegular: true,
         startDate: '2025-04-06',
-        endDate: '2026-04-05',
-        includeCurrentMonth: true
+        endDate: '2026-04-05'
       }
     ],
     deductions: [],
@@ -44,8 +44,7 @@ const SCENARIOS = {
         incomeToDate: 15000,
         isRegular: true,
         startDate: '2025-04-06',
-        endDate: '2026-04-05',
-        includeCurrentMonth: true
+        endDate: '2026-04-05'
       },
       {
         id: '2',
@@ -53,8 +52,7 @@ const SCENARIOS = {
         incomeToDate: 8000,
         isRegular: true,
         startDate: '2025-06-01',
-        endDate: '2026-04-05',
-        includeCurrentMonth: true
+        endDate: '2026-04-05'
       }
     ],
     deductions: [
@@ -82,8 +80,7 @@ const SCENARIOS = {
         incomeToDate: 18106.06,
         isRegular: true,
         startDate: '2025-04-06',
-        endDate: '2026-04-05',
-        includeCurrentMonth: true
+        endDate: '2026-04-05'
       },
       {
         id: '2',
@@ -92,7 +89,6 @@ const SCENARIOS = {
         isRegular: false,
         startDate: '2025-04-06',
         endDate: '2026-04-05',
-        includeCurrentMonth: true,
         taxPaid: 3452.06  // Emergency 0T code over-taxation
       }
     ],
@@ -115,8 +111,7 @@ const SCENARIOS = {
         incomeToDate: 65000,
         isRegular: true,
         startDate: '2025-04-06',
-        endDate: '2026-04-05',
-        includeCurrentMonth: true
+        endDate: '2026-04-05'
       },
       {
         id: '2',
@@ -125,7 +120,6 @@ const SCENARIOS = {
         isRegular: false,
         startDate: '2025-04-06',
         endDate: '2026-04-05',
-        includeCurrentMonth: true,
         taxPaid: 11250  // 45% emergency tax rate
       }
     ],
@@ -155,8 +149,7 @@ const SCENARIOS = {
         incomeToDate: 5800,
         isRegular: true,
         startDate: '2025-04-06',
-        endDate: '2026-04-05',
-        includeCurrentMonth: true
+        endDate: '2026-04-05'
       },
       {
         id: '2',
@@ -164,8 +157,7 @@ const SCENARIOS = {
         incomeToDate: 15000,
         isRegular: true,
         startDate: '2025-04-06',
-        endDate: '2026-04-05',
-        includeCurrentMonth: true
+        endDate: '2026-04-05'
       },
       {
         id: '3',
@@ -174,7 +166,6 @@ const SCENARIOS = {
         isRegular: false,
         startDate: '2025-04-06',
         endDate: '2026-04-05',
-        includeCurrentMonth: true,
         taxPaid: 9000  // 45% emergency tax
       }
     ],
@@ -191,8 +182,7 @@ const SCENARIOS = {
         incomeToDate: 20000,
         isRegular: true,
         startDate: '2025-04-06',
-        endDate: '2026-04-05',
-        includeCurrentMonth: true
+        endDate: '2026-04-05'
       },
       {
         id: '2',
@@ -201,7 +191,6 @@ const SCENARIOS = {
         isRegular: false,
         startDate: '2025-04-06',
         endDate: '2026-04-05',
-        includeCurrentMonth: true,
         taxPaid: 800
       }
     ],
@@ -260,8 +249,7 @@ function App() {
       incomeToDate: 0,
       isRegular: true,
       startDate: TAX_YEAR_START.toISOString().split('T')[0],
-      endDate: TAX_YEAR_END.toISOString().split('T')[0],
-      includeCurrentMonth: true
+      endDate: TAX_YEAR_END.toISOString().split('T')[0]
     };
     recalculate([...sources, newSource], deductions, adjustments);
   };
@@ -445,7 +433,7 @@ function App() {
                   <th>Income Earned So Far (£)</th>
                   <th>Start Date</th>
                   <th>End Date</th>
-                  <th>Include Current Month?</th>
+                  <th>Months Paid</th>
                   <th>Projected/Actual Income (£)</th>
                   <th>Tax Paid (£)</th>
                   <th>PA Used (£)</th>
@@ -455,10 +443,10 @@ function App() {
                 </tr>
               </thead>
               <tbody>
-                {sources.map((source, idx) => {
-                  // Use index to match breakdown and detail (not name, as names can be duplicated)
-                  const breakdown = result?.breakdown.sources[idx];
-                  const detail = result?.sourceDetails[idx];
+                {sources.map((source) => {
+                  // Match by source id since calculation logic sorts sources
+                  const breakdown = result?.breakdown.sources.find(s => s.id === source.id);
+                  const detail = result?.sourceDetails.find(d => d.id === source.id);
                   const projectedOrActual = breakdown?.projectedOrActual || 0;
 
                   return (
@@ -520,15 +508,25 @@ function App() {
                       </td>
                       <td>
                         {source.isRegular ? (
-                          <button
-                            type="button"
-                            onClick={() => updateSource(source.id, 'includeCurrentMonth', !source.includeCurrentMonth)}
-                            className={`include-toggle ${source.includeCurrentMonth ? 'on' : 'off'}`}
-                            aria-pressed={source.includeCurrentMonth}
-                            title={source.includeCurrentMonth ? 'Click to exclude current month from projection' : 'Click to include current month in projection'}
-                          >
-                            {source.includeCurrentMonth ? 'Include' : 'Exclude'}
-                          </button>
+                          (() => {
+                            const options = getValidMonthsPaidOptions(source.startDate);
+                            // Default to the higher option if not set
+                            const currentValue = source.monthsPaid ?? (options.length > 0 ? options[0].value : undefined);
+                            return (
+                              <select
+                                value={currentValue ?? ''}
+                                onChange={(e) => updateSource(source.id, 'monthsPaid', parseInt(e.target.value, 10))}
+                                className="input-field months-paid-select"
+                                title="Select how many months of pay you have received"
+                              >
+                                {options.map((opt) => (
+                                  <option key={opt.value} value={opt.value}>
+                                    {opt.label}
+                                  </option>
+                                ))}
+                              </select>
+                            );
+                          })()
                         ) : (
                           <span className="disabled-cell">N/A</span>
                         )}
@@ -912,9 +910,12 @@ function App() {
                       <div className="breakdown-detail">
                         {source.calculation}
                       </div>
-                      {source.daysWorked && (
+                      {source.periodsWorked && (
                         <div className="breakdown-meta">
-                          Days worked: {source.daysWorked} | Days in period: {source.daysInYear}
+                          Periods worked: {source.periodsWorked?.toFixed(3)} | Total periods: {source.totalPeriods?.toFixed(3)} | Monthly rate: £{source.monthlyRate?.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {source.firstPeriodFraction !== undefined && source.firstPeriodFraction < 1 && (
+                            <> | First period (P{source.startPeriodNumber}): {(source.firstPeriodFraction * 100).toFixed(1)}%</>
+                          )}
                         </div>
                       )}
                     </div>
