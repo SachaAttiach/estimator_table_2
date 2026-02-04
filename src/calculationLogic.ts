@@ -68,6 +68,7 @@ export function isAdjustmentTaxableIncome(type: TaxAdjustment['type']): boolean 
 }
 
 export interface SourceTaxDetail {
+  id: string;
   name: string;
   income: number;
   paUsed: number;
@@ -102,6 +103,7 @@ export interface CalculationBreakdown {
 }
 
 export interface SourceBreakdown {
+  id: string;
   name: string;
   incomeToDate: number;
   isRegular: boolean;
@@ -797,6 +799,7 @@ function allocateTaxSequentially(
     const difference = taxPaid - taxDue;
     
     details.push({
+      id: source.id,
       name: source.name,
       income: Math.round(income * 100) / 100,
       paUsed: Math.round(paForThisSource * 100) / 100,
@@ -836,10 +839,28 @@ export function calculateTax(
   
   let totalIncome = 0;
   
+  // Sort sources consistently to ensure order-independent results
+  // Order: Regular sources first, then ceased/one-offs
+  // Within each group, sort by start date (earliest first), then by id for stability
+  const sortedSources = [...sources].sort((a, b) => {
+    // Regular sources come before non-regular (ceased/one-off)
+    if (a.isRegular !== b.isRegular) {
+      return a.isRegular ? -1 : 1;
+    }
+    // Within the same category, sort by start date
+    const dateA = parseDate(a.startDate).getTime();
+    const dateB = parseDate(b.startDate).getTime();
+    if (dateA !== dateB) {
+      return dateA - dateB;
+    }
+    // If same date, sort by id for stability
+    return a.id.localeCompare(b.id);
+  });
+  
   // Step 1: Calculate total income
   breakdown.steps.push('=== STEP 1: Calculate Total Income ===');
   
-  for (const source of sources) {
+  for (const source of sortedSources) {
     let finalIncome: number;
     let calculation: string;
     let periodsWorked: number | undefined;
@@ -892,6 +913,7 @@ export function calculateTax(
     totalIncome += finalIncome;
     
     breakdown.sources.push({
+      id: source.id,
       name: source.name,
       incomeToDate: source.incomeToDate,
       isRegular: source.isRegular,
@@ -938,7 +960,7 @@ export function calculateTax(
   
   // Get projected incomes for sequential allocation
   const projectedIncomes = breakdown.sources.map(s => s.projectedOrActual);
-  const sourceDetails = allocateTaxSequentially(sources, projectedIncomes, personalAllowance, taxBands);
+  const sourceDetails = allocateTaxSequentially(sortedSources, projectedIncomes, personalAllowance, taxBands);
   
   // Add detailed breakdown for each source
   for (const detail of sourceDetails) {

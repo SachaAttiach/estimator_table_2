@@ -443,10 +443,10 @@ function App() {
                 </tr>
               </thead>
               <tbody>
-                {sources.map((source, idx) => {
-                  // Use index to match breakdown and detail (not name, as names can be duplicated)
-                  const breakdown = result?.breakdown.sources[idx];
-                  const detail = result?.sourceDetails[idx];
+                {sources.map((source) => {
+                  // Match by source id since calculation logic sorts sources
+                  const breakdown = result?.breakdown.sources.find(s => s.id === source.id);
+                  const detail = result?.sourceDetails.find(d => d.id === source.id);
                   const projectedOrActual = breakdown?.projectedOrActual || 0;
 
                   return (
