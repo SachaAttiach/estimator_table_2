@@ -243,13 +243,17 @@ function App() {
 
   // Add new income source
   const addSource = () => {
+    const startDateStr = TAX_YEAR_START.toISOString().split('T')[0];
+    const defaultMonthsPaidOptions = getValidMonthsPaidOptions(startDateStr);
+    const defaultMonthsPaid = defaultMonthsPaidOptions.length > 0 ? defaultMonthsPaidOptions[0].value : undefined;
     const newSource: IncomeSource = {
       id: Date.now().toString(),
       name: '',
       incomeToDate: 0,
       isRegular: true,
-      startDate: TAX_YEAR_START.toISOString().split('T')[0],
-      endDate: TAX_YEAR_END.toISOString().split('T')[0]
+      startDate: startDateStr,
+      endDate: TAX_YEAR_END.toISOString().split('T')[0],
+      monthsPaid: defaultMonthsPaid
     };
     recalculate([...sources, newSource], deductions, adjustments);
   };
@@ -272,6 +276,12 @@ function App() {
         // Clear projected income override if user changes calculation inputs
         if (field !== 'projectedIncome' && field !== 'name') {
           delete updated.projectedIncome;
+        }
+        // When start date changes or source becomes regular, reset monthsPaid to the default
+        if (field === 'startDate' || (field === 'isRegular' && value === true)) {
+          const startDateForOptions = field === 'startDate' ? value : updated.startDate;
+          const options = getValidMonthsPaidOptions(startDateForOptions);
+          updated.monthsPaid = options.length > 0 ? options[0].value : undefined;
         }
         return updated;
       }
